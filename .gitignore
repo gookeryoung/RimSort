@@ -16,6 +16,7 @@ htmlcov/
 coverage.xml
 nosetests.xml
 junit/
+.benchmarks/
 
 # Type checkers
 .mypy_cache/

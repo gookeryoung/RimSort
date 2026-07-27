@@ -650,7 +650,7 @@ Manage mods installed from GitHub releases.</source>
 {mod_list}</source>
         <translation>完全删除以下模组吗？此操作无法撤消。
 
-{mod_列表}</translation>
+ {mod_list}</translation>
     </message>
     <message>
         <source>Deleted {n} mod(s).</source>
@@ -658,7 +658,7 @@ Manage mods installed from GitHub releases.</source>
     </message>
     <message>
         <source>File deletion failed for: {names}</source>
-        <translation>文件删除失败：{name}</translation>
+        <translation>文件删除失败： {names}</translation>
     </message>
     <message>
         <source>Convert the following mods to git tracking? They will be updated via the Git Mod Updater instead of GitHub releases.
@@ -666,7 +666,7 @@ Manage mods installed from GitHub releases.</source>
 {mod_list}</source>
         <translation>将以下 mod 转换为 git 跟踪？它们将通过 Git Mod Updater 而不是 GitHub 版本进行更新。
 
-{mod_列表}</translation>
+ {mod_list}</translation>
     </message>
     <message>
         <source>Release-based mods will be re-cloned from HEAD, replacing current files.</source>
@@ -682,7 +682,7 @@ Manage mods installed from GitHub releases.</source>
     </message>
     <message>
         <source>Failed: {names}</source>
-        <translation>失败：{名称}</translation>
+        <translation>失败： {names}</translation>
     </message>
     <message>
         <source>Checking for updates...</source>

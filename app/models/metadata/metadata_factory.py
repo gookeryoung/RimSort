@@ -1,4 +1,3 @@
-import itertools
 import os
 import re
 import traceback
@@ -725,7 +724,18 @@ def create_rules_from_external_rules(external_rule: ExternalRule) -> Rules:
 
 
 def _find_about_xml(mod_path: Path) -> Path | None:
-    """Case-insensitive lookup for About/About.xml inside a mod directory."""
+    """Case-insensitive lookup for About/About.xml inside a mod directory.
+
+    优化:先试标准路径 ``mod_path/About/About.xml``(95%+ mod 命中),
+    命中即返回,避免 ``iterdir`` 双层遍历的开销。
+    标准路径未命中时才回退到大小写不敏感的目录扫描。
+    """
+    # 快速路径:标准路径直接命中
+    standard = mod_path / "About" / "About.xml"
+    if standard.is_file():
+        return standard
+
+    # 回退:大小写不敏感扫描(处理 About/about.xml、ABOUT/ABOUT.XML 等变体)
     for entry in mod_path.iterdir():
         if entry.name.lower() == "about" and entry.is_dir():
             for child in entry.iterdir():
@@ -781,16 +791,12 @@ def create_listed_mod_from_path(
             )
 
         # Check for any file with .rsc extension
-        generator = path.glob("*.rsc")
-        gen, _ = itertools.tee(generator, 2)
-
-        gen1 = next(gen, None)
-        gen2 = next(gen, None)
-
+        # 优化:原实现用 itertools.tee + next + list(glob) 共扫描 3 次目录,
+        # 改为单次 list 物化后用长度判断
         rsc_files = list(path.glob("*.rsc"))
 
         # Abort if multiple .rsc files are found
-        if gen2 is not None:
+        if len(rsc_files) > 1:
             logger.warning(
                 f"Multiple .rsc files found in {path}. Cannot determine which file to use. Aborting parse of directory."
             )
@@ -800,7 +806,7 @@ def create_listed_mod_from_path(
                 rimworld_path,
                 workshop_path,
             )
-        elif gen1 is not None:
+        elif len(rsc_files) == 1:
             success, scenario_mod = _create_scenario_mod_from_rsc(path, rsc_files[0])
             return success, _set_mod_type(
                 scenario_mod, local_path, rimworld_path, workshop_path

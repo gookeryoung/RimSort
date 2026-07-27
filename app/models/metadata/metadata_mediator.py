@@ -19,6 +19,7 @@ from app.models.metadata.metadata_structure import (
     ListedMod,
     SteamDbSchema,
 )
+from app.utils.perf_timing import log_stage
 from app.utils.xml import xml_path_to_json
 
 
@@ -190,38 +191,42 @@ class MetadataMediator:
                 )
                 return
 
-        self._refresh_game_version()
+        with log_stage("refresh_metadata._refresh_game_version"):
+            self._refresh_game_version()
 
-        self._user_rules = read_rules_db(self.user_rules_path)
+        with log_stage("refresh_metadata.read_rules_db"):
+            self._user_rules = read_rules_db(self.user_rules_path)
 
-        self._community_rules = (
-            read_rules_db(self.community_rules_path)
-            if self.community_rules_path is not None
-            else None
-        )
-        self._steam_db = (
-            read_steam_db(self.steam_db_path)
-            if self.steam_db_path is not None
-            else None
-        )
+            self._community_rules = (
+                read_rules_db(self.community_rules_path)
+                if self.community_rules_path is not None
+                else None
+            )
+            self._steam_db = (
+                read_steam_db(self.steam_db_path)
+                if self.steam_db_path is not None
+                else None
+            )
 
         # Load additional external metadata
-        self._load_no_version_warning()
-        self._load_use_this_instead()
+        with log_stage("refresh_metadata.load_external_metadata"):
+            self._load_no_version_warning()
+            self._load_use_this_instead()
 
         # Get all folders in the workshop and local mods paths
-        mod_paths: list[Path] = []
-        for search_path in (
-            self.workshop_mods_path,
-            self.local_mods_path,
-            self.game_modules_path,
-        ):
-            if search_path is None:
-                continue
-            if not search_path.exists():
-                logger.warning(f"Mod search path does not exist: {search_path}")
-                continue
-            mod_paths.extend(p for p in search_path.iterdir() if p.is_dir())
+        with log_stage("refresh_metadata.collect_mod_paths"):
+            mod_paths: list[Path] = []
+            for search_path in (
+                self.workshop_mods_path,
+                self.local_mods_path,
+                self.game_modules_path,
+            ):
+                if search_path is None:
+                    continue
+                if not search_path.exists():
+                    logger.warning(f"Mod search path does not exist: {search_path}")
+                    continue
+                mod_paths.extend(p for p in search_path.iterdir() if p.is_dir())
 
         # Create equal sized batches of mod_paths for threadpool processing
         threads = QThread.idealThreadCount()
@@ -261,7 +266,8 @@ class MetadataMediator:
             self.parser_threadpool.start(parser)
 
         logger.debug(f"Started {self.parser_threadpool.activeThreadCount()} threads")
-        self.parser_threadpool.waitForDone()
+        with log_stage("refresh_metadata.parse_all_mods"):
+            self.parser_threadpool.waitForDone()
         logger.info(f"Metadata refresh complete, found {len(self._mods_metadata)} mods")
         return
 

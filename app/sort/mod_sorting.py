@@ -1,5 +1,6 @@
 import os
 import time
+from collections import OrderedDict
 from enum import Enum
 
 from loguru import logger
@@ -11,9 +12,13 @@ from app.models.metadata.metadata_structure import AboutXmlMod, ListedMod
 from app.models.settings import Settings
 from app.utils.aux_db_utils import auxdb_get_mod_tags
 from app.utils.generic import scanpath
+from app.utils.perf_timing import perf_log
 
-# Simple in-memory cache for folder sizes: {mod_path: (mtime, size_bytes)}
-_FOLDER_SIZE_CACHE: dict[str, tuple[int, int]] = {}
+# LRU cache for folder sizes: {mod_path: (mtime, size_bytes)}
+# 优化:原为无上限 dict,长期运行内存膨胀。改为 OrderedDict + LRU 淘汰,
+# maxsize=10000 覆盖典型用户 mod 数量(数千),超出后淘汰最久未访问项。
+_FOLDER_SIZE_CACHE_MAX_SIZE = 10000
+_FOLDER_SIZE_CACHE: OrderedDict[str, tuple[int, int]] = OrderedDict()
 
 
 def path_no_key(path: str) -> str:
@@ -119,11 +124,16 @@ def path_to_folder_size(
 
     cached = _FOLDER_SIZE_CACHE.get(mod_path_str)
     if cached and cached[0] == mtime:
+        # LRU 命中:移到末尾(最近使用)
+        _FOLDER_SIZE_CACHE.move_to_end(mod_path_str)
         return cached[1]
 
     total_size = get_dir_size(mod_path_str)
 
     _FOLDER_SIZE_CACHE[mod_path_str] = (mtime, total_size)
+    # LRU 淘汰:超过上限时移除最久未访问项(队首)
+    if len(_FOLDER_SIZE_CACHE) > _FOLDER_SIZE_CACHE_MAX_SIZE:
+        _FOLDER_SIZE_CACHE.popitem(last=False)
     return total_size
 
 
@@ -278,14 +288,17 @@ def _get_path_to_color_map(
     :return: Dictionary mapping path -> color_hex string (only includes mods with colors)
     """
     path_to_color: dict[str, str] = {}
+    if not paths:
+        return path_to_color
     try:
         aux_controller = AuxMetadataController.get_or_create_cached_instance(
             settings.aux_db_path
         )
         with aux_controller.Session() as aux_session:
-            for path in paths:
-                aux_entry = aux_controller.get(aux_session, path)
-                if aux_entry and aux_entry.color_hex:
+            # 批量查询:单次 IN 替代 N 次 get
+            entries = aux_controller.get_many(aux_session, paths)
+            for path, aux_entry in entries.items():
+                if aux_entry.color_hex:
                     path_to_color[path] = aux_entry.color_hex
     except Exception as e:
         logger.warning(f"Failed to fetch auxiliary metadata for batch: {e}")
@@ -303,14 +316,17 @@ def _get_path_to_updated_map(
     :return: Dictionary mapping path -> update timestamp (only includes mods with valid timestamps)
     """
     path_to_updated: dict[str, int] = {}
+    if not paths:
+        return path_to_updated
     try:
         aux_controller = AuxMetadataController.get_or_create_cached_instance(
             settings.aux_db_path
         )
         with aux_controller.Session() as aux_session:
-            for path in paths:
-                aux_entry = aux_controller.get(aux_session, path)
-                if aux_entry and aux_entry.acf_time_updated > 0:
+            # 批量查询:单次 IN 替代 N 次 get
+            entries = aux_controller.get_many(aux_session, paths)
+            for path, aux_entry in entries.items():
+                if aux_entry.acf_time_updated > 0:
                     path_to_updated[path] = aux_entry.acf_time_updated
     except Exception as e:
         logger.warning(f"Failed to fetch update times from auxiliary metadata: {e}")
@@ -453,6 +469,7 @@ def sort_paths(
     logger.debug(
         f"Sorted {len(paths)} mods by {key.name} ({reverse_flag and 'desc' or 'asc'}) in {elapsed:.3f}s"
     )
+    perf_log(f"sort_paths[{key.name}]", start_time)
 
     return sorted_result
 

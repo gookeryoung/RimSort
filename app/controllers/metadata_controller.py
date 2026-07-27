@@ -27,6 +27,7 @@ from app.models.metadata.metadata_structure import (
 from app.models.settings import Instance, Settings
 from app.utils.acf_utils import load_acf_from_path
 from app.utils.app_info import AppInfo
+from app.utils.perf_timing import log_stage
 from app.utils.schema import generate_rimworld_mods_list, validate_rimworld_mods_list
 from app.utils.steam.steamcmd.wrapper import SteamcmdInterface
 from app.utils.xml import json_to_xml_write, xml_path_to_json
@@ -514,11 +515,18 @@ class MetadataController(QObject):
 
         logger.debug("Started generating active and inactive mods")
 
-        for path, mod_data in all_mods.items():
-            if isinstance(mod_data, AboutXmlMod):
-                pid = str(mod_data.package_id)
-                duplicate_mods.setdefault(pid, []).append(path)
-        duplicate_mods = {k: v for k, v in duplicate_mods.items() if len(v) > 1}
+        # 一次遍历构建两个索引:
+        #   duplicate_mods: package_id -> list[path](仅保留长度>1)
+        #   pid_to_paths_mods: package_id -> list[(path, mod)](完整,用于 O(1) 查找)
+        # 原实现 O(M×N) 嵌套遍历,优化后 O(M+N)
+        with log_stage("get_mods_from_list.build_duplicate_index"):
+            pid_to_paths_mods: dict[str, list[tuple[str, AboutXmlMod]]] = {}
+            for path, mod_data in all_mods.items():
+                if isinstance(mod_data, AboutXmlMod):
+                    pid = str(mod_data.package_id)
+                    duplicate_mods.setdefault(pid, []).append(path)
+                    pid_to_paths_mods.setdefault(pid, []).append((path, mod_data))
+            duplicate_mods = {k: v for k, v in duplicate_mods.items() if len(v) > 1}
 
         if isinstance(mod_list, str):
             if not os.path.exists(mod_list):
@@ -537,28 +545,37 @@ class MetadataController(QObject):
             package_ids_to_import = mod_list
 
         logger.info("Generating active mod list")
-        for package_id in package_ids_to_import:
-            package_id_normalized = package_id.lower()
-            package_id_steam_suffix = "_steam"
-            package_id_normalized_stripped = package_id_normalized.replace(
-                package_id_steam_suffix, ""
-            )
-            is_steam = package_id_steam_suffix in package_id_normalized
-            target_id = (
-                package_id_normalized_stripped if is_steam else package_id_normalized
-            )
-            to_populate.append(target_id)
-            sources_order = (
-                SOURCE_PRIORITY_STEAM if is_steam else SOURCE_PRIORITY_DEFAULT
-            )
-            for path, mod in all_mods.items():
-                if not isinstance(mod, AboutXmlMod):
-                    continue
-                metadata_package_id = str(mod.package_id)
-                if metadata_package_id in [
+        with log_stage("get_mods_from_list.match_active_mods"):
+            for package_id in package_ids_to_import:
+                package_id_normalized = package_id.lower()
+                package_id_steam_suffix = "_steam"
+                package_id_normalized_stripped = package_id_normalized.replace(
+                    package_id_steam_suffix, ""
+                )
+                is_steam = package_id_steam_suffix in package_id_normalized
+                target_id = (
+                    package_id_normalized_stripped if is_steam else package_id_normalized
+                )
+                to_populate.append(target_id)
+                sources_order = (
+                    SOURCE_PRIORITY_STEAM if is_steam else SOURCE_PRIORITY_DEFAULT
+                )
+                # O(1) 索引查找:同时匹配 normalized 与 stripped 两个 key,去重合并
+                # 原实现为遍历整个 all_mods(O(N)),优化后 O(候选数)
+                seen_candidate_paths: set[str] = set()
+                candidate_paths: list[str] = []
+                for lookup_key in (
                     package_id_normalized,
                     package_id_normalized_stripped,
-                ]:
+                ):
+                    for cand_path, _cand_mod in pid_to_paths_mods.get(
+                        lookup_key, []
+                    ):
+                        if cand_path not in seen_candidate_paths:
+                            seen_candidate_paths.add(cand_path)
+                            candidate_paths.append(cand_path)
+
+                for path in candidate_paths:
                     if target_id not in duplicate_mods:
                         populated_mods.append(target_id)
                         active_mod_paths.append(path)

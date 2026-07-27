@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from loguru import logger
 from sqlalchemy import create_engine, text
@@ -205,6 +205,79 @@ class AuxMetadataController(MetadataDbController):
                 raise e
 
         return entry
+
+    @staticmethod
+    def get_many(
+        session: Session, item_paths: Sequence[Path | str]
+    ) -> dict[str, AuxMetadataEntry]:
+        """批量查询多个 path 对应的 aux metadata entry。
+
+        用单次 ``IN`` 查询替代 N 次 ``get``,将排序与列表重建等场景的
+        数据库往返从 N 次降到 1 次。
+
+        :param session: 数据库会话
+        :param item_paths: 待查询的 path 列表
+        :return: ``{path_str: entry}`` 字典,未命中的 path 不包含在结果中
+        """
+        if not item_paths:
+            return {}
+        normalized = [str(p) if isinstance(p, Path) else p for p in item_paths]
+        entries = (
+            session.query(AuxMetadataEntry)
+            .filter(AuxMetadataEntry.path.in_(normalized))
+            .all()
+        )
+        return {entry.path: entry for entry in entries}
+
+    @staticmethod
+    def upsert_many(
+        session: Session,
+        item_paths: Sequence[Path | str],
+        default_factory: Any = None,
+        **update_fields: Any,
+    ) -> dict[str, AuxMetadataEntry]:
+        """批量 get-or-create + update,共用一次 commit。
+
+        适用于 ``recreate_mod_list`` 等"对每个 path 都 get_or_create +
+        update 相同字段"的场景,将 N 次 session 创建 + N 次 commit 降到
+        1 次 session + 1 次 commit。
+
+        :param session: 数据库会话
+        :param item_paths: 待处理的 path 列表
+        :param default_factory: 可选,用于创建新 entry 的工厂函数,
+            签名 ``() -> AuxMetadataEntry``;默认用 ``AuxMetadataEntry(path=...)``
+        :param update_fields: 对所有 entry(含新建与已存在)设置的公共字段
+        :return: ``{path_str: entry}`` 字典,包含所有 item_paths 对应的 entry
+        """
+        if not item_paths:
+            return {}
+        normalized = [str(p) if isinstance(p, Path) else p for p in item_paths]
+        existing = AuxMetadataController.get_many(session, normalized)
+        new_entries: list[AuxMetadataEntry] = []
+        for path in normalized:
+            if path not in existing:
+                if default_factory is not None:
+                    entry = default_factory()
+                    entry.path = path
+                else:
+                    entry = AuxMetadataEntry(path=path)
+                for k, v in update_fields.items():
+                    setattr(entry, k, v)
+                new_entries.append(entry)
+                existing[path] = entry
+            else:
+                entry = existing[path]
+                for k, v in update_fields.items():
+                    setattr(entry, k, v)
+        if new_entries:
+            session.add_all(new_entries)
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.exception(f"Failed to upsert {len(normalized)} aux metadata entries: {e}")
+            raise e
+        return existing
 
     @staticmethod
     def get_value_equals(

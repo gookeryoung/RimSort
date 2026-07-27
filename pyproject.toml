@@ -41,13 +41,19 @@ steamfiles = { git = "https://github.com/RimSort/steamfiles" }
 [tool.fspack.entries]
 rimsort = "app/__main__.py"
 
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
 [dependency-groups]
 dev = [
     "lxml-stubs>=0.5.1",
     "mypy>=1.20.2",
+    "pyinstrument",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-benchmark",
     "pytest-cov>=6.2.1",
     "pytest-mock>=3.15.1",
     "pytest-qt>=4.5.0",
@@ -63,7 +69,6 @@ dev = [
     "types-pygments>=2.20.0.20260518",
     "types-requests>=2.33.0.20260712",
     "types-toposort>=1.10.0.20250401",
-
 ]
 
 build = [

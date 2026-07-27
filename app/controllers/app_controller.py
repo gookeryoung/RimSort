@@ -1,6 +1,8 @@
 import os
 import sys
+import threading
 
+from loguru import logger
 from PySide6.QtCore import QCoreApplication, QLibraryInfo, QObject, QTranslator
 from PySide6.QtWidgets import QApplication
 
@@ -15,6 +17,7 @@ from app.services.instance_service import InstanceService
 from app.utils.app_info import AppInfo
 from app.utils.dds_utility import DDSUtility
 from app.utils.gui_info import GUIInfo
+from app.utils.perf_timing import log_stage
 from app.utils.steam.steamcmd.wrapper import SteamcmdInterface
 from app.views.main_window import MainWindow
 from app.views.settings_dialog import SettingsDialog
@@ -27,28 +30,38 @@ class AppController(QObject):
     def __init__(self) -> None:
         super().__init__()
 
-        self.app = QApplication(sys.argv)
-        self.app.setDesktopFileName("io.github.rimsort.RimSort")
-        self.app.setWindowIcon(GUIInfo().app_icon)
+        with log_stage("QApplication.construct"):
+            self.app = QApplication(sys.argv)
+            self.app.setDesktopFileName("io.github.rimsort.RimSort")
+            self.app.setWindowIcon(GUIInfo().app_icon)
 
         # Initialize the application settings.
-        self.initialize_settings()
+        with log_stage("initialize_settings"):
+            self.initialize_settings()
         # set the language of the application.
-        self.set_language()
+        with log_stage("set_language"):
+            self.set_language()
         # Initialize the theme controller
-        self.initialize_theme_controller()
+        with log_stage("initialize_theme_controller"):
+            self.initialize_theme_controller()
         # Set the theme of the application.
-        self.set_theme()
+        with log_stage("set_theme"):
+            self.set_theme()
         # Initialize the Steamcmd interface
-        self.initialize_steamcmd_interface()
+        with log_stage("initialize_steamcmd_interface"):
+            self.initialize_steamcmd_interface()
         # Perform cleanup of orphaned DDS files if the setting is enabled
-        self.do_dds_cleanup()
+        with log_stage("do_dds_cleanup"):
+            self.do_dds_cleanup()
         # Initialize the new MetadataController
-        self.initialize_metadata_controller()
+        with log_stage("initialize_metadata_controller"):
+            self.initialize_metadata_controller()
         # Initialize the instance service (self-subscribes to EventBus)
-        self.initialize_instance_service()
+        with log_stage("initialize_instance_service"):
+            self.initialize_instance_service()
         # Initialize the main window controller
-        self.initialize_main_window()
+        with log_stage("initialize_main_window"):
+            self.initialize_main_window()
 
     def set_language(self) -> None:
         """Sets the language of the application on initial setup."""
@@ -115,10 +128,34 @@ class AppController(QObject):
         )
 
     def do_dds_cleanup(self) -> None:
-        """Performs cleanup of orphaned DDS files if the setting is enabled."""
-        if self.settings.auto_delete_orphaned_dds:
-            dds_utility = DDSUtility(self.settings_controller.settings)
+        """Performs cleanup of orphaned DDS files if the setting is enabled.
+
+        优化:原实现同步执行 ``rglob("*.dds")`` 扫描 local + workshop 目录,
+        会阻塞启动。改为后台 daemon 线程执行,启动不等待。
+        DDS 清理是纯 I/O 操作且幂等(下次启动会继续清理未完成的),
+        daemon 线程在应用退出时被强制终止不会留下不一致状态。
+        """
+        if not self.settings.auto_delete_orphaned_dds:
+            return
+        # 复制 settings 引用,避免后台线程与主线程竞争 controller 状态
+        settings = self.settings_controller.settings
+        thread = threading.Thread(
+            target=self._dds_cleanup_worker,
+            args=(settings,),
+            name="dds_cleanup",
+            daemon=True,
+        )
+        thread.start()
+
+    @staticmethod
+    def _dds_cleanup_worker(settings: Settings) -> None:
+        """DDS 清理后台工作线程入口。"""
+        try:
+            dds_utility = DDSUtility(settings)
             dds_utility.delete_dds_files_without_png()
+        except Exception:
+            # daemon 线程内异常不能冒泡到主线程,记录日志即可
+            logger.exception("DDS cleanup background thread failed")
 
     def initialize_metadata_controller(self) -> None:
         """Initializes the MetadataController."""

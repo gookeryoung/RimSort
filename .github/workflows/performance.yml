@@ -1,0 +1,93 @@
+name: Performance Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Dependencies
+        shell: bash
+        run: uv sync --locked --dev
+
+      - name: Install special python dependencies
+        shell: bash
+        run: |
+          set -e
+          uv run --frozen python ./distribute.py --skip-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install missing Linux libs for gui tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libegl-dev libgl1 libglx-mesa0 libglib2.0-0 xvfb libxcb-cursor-dev
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
+        shell: bash
+
+      - name: Restore benchmark baseline
+        id: restore-baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: .benchmarks
+          key: benchmark-baseline-ubuntu-latest
+          restore-keys: |
+            benchmark-baseline-ubuntu-latest
+
+      - name: Run benchmarks
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_DEBUG_PLUGINS: "1"
+          PYTHONIOENCODING: "utf-8"
+        shell: bash
+        run: |
+          # 若存在上次基线,对比并设 20% 退化阈值(共享 runner 噪声大,阈值宽松)
+          # 若无基线,首次运行只保存,不阻塞
+          if [ -d ".benchmarks" ] && [ -n "$(ls -A .benchmarks 2>/dev/null)" ]; then
+            echo "Found existing baseline, running comparison..."
+            uv run pytest tests/benchmarks/test_perf_baseline.py \
+              --benchmark-compare \
+              --benchmark-compare-fail=mean:20% \
+              --benchmark-min-rounds=5 \
+              --benchmark-warmup=on \
+              --benchmark-save=ci
+          else
+            echo "No baseline found, saving initial baseline..."
+            uv run pytest tests/benchmarks/test_perf_baseline.py \
+              --benchmark-save=baseline \
+              --benchmark-min-rounds=5 \
+              --benchmark-warmup=on
+          fi
+
+      - name: Save benchmark baseline
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .benchmarks
+          key: benchmark-baseline-ubuntu-latest-${{ github.run_id }}
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: .benchmarks/

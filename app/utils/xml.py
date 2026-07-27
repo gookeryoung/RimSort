@@ -7,6 +7,7 @@ from typing import Any
 import zstandard as zstd
 from bs4 import BeautifulSoup
 from loguru import logger
+from lxml import etree as LET
 
 
 def etree_to_dict(t: Any) -> dict[str, Any]:
@@ -89,6 +90,10 @@ def xml_path_to_json(path: str) -> dict[str, Any]:
     Return the contents of an XML file as a dictionary. The XML file can be a compressed file supported by __open_file_maybe_compressed.
     If the file does not exist, return an empty dict.
 
+    优化:默认解析器从 ``xml.etree.ElementTree`` 切换到 ``lxml.etree``(C 实现,
+    解析速度 3-5x)。``lxml.etree`` 的 Element API 与 stdlib 兼容,
+    ``etree_to_dict`` 无需修改。失败时仍回退到 BeautifulSoup。
+
     :param path: Path to the XML file.
     :return: Dictionary of XML file contents.
     """
@@ -97,14 +102,14 @@ def xml_path_to_json(path: str) -> dict[str, Any]:
         logger.error(f"XML file does not exist at: {path}")
         return data
     try:
-        # Parse XML file using xml.etree.ElementTree for standard library parsing
+        # 优先用 lxml.etree(C 实现,比 stdlib ET 快 3-5x)
         with __open_file_maybe_compressed(path) as f:
-            tree = ET.parse(f)
+            tree = LET.parse(f)
             root = tree.getroot()
             data = etree_to_dict(root)
     except Exception as e:
-        # If ET parsing fails, attempt parsing with BeautifulSoup
-        logger.debug(f"Error parsing XML file with xml.etree.ElementTree: {e}")
+        # lxml 解析失败,回退到 BeautifulSoup(lxml-xml 容错性更好)
+        logger.debug(f"Error parsing XML file with lxml.etree: {e}")
         logger.debug("Trying to parse with BeautifulSoup as a fallback")
         try:
             with __open_file_maybe_compressed(path) as f:

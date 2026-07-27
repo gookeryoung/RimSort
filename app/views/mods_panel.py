@@ -84,6 +84,7 @@ from app.utils.aux_db_utils import (
     auxdb_update_all_mod_colors,
     auxdb_update_mod_color,
 )
+from app.utils.perf_timing import log_stage
 from app.utils.constants import (
     KNOWN_MOD_REPLACEMENTS,
 )
@@ -3812,26 +3813,27 @@ class ModListWidget(QListWidget):
         :param filtering: if True, UUIDs are already sorted; skip sorting
         """
         logger.info(f"Internally recreating {list_type} mod list")
-        # Skip sorting if UUIDs are already filtered/sorted (filtering=True)
-        if not filtering:
-            # Sort inactive mods using saved settings if enabled
-            if list_type == "Inactive" and self.settings.save_inactive_mods_sort_state:
-                sort_key = ModsPanelSortKey[self.settings.inactive_mods_sort_key]
-                descending = self.settings.inactive_mods_sort_descending
-                uuids = sort_paths(
-                    uuids,
-                    key=sort_key,
-                    descending=descending,
-                    settings=self.settings,
-                )
-            else:
-                if list_type == "Inactive":
+        with log_stage(f"recreate_mod_list[{list_type}].sort"):
+            # Skip sorting if UUIDs are already filtered/sorted (filtering=True)
+            if not filtering:
+                # Sort inactive mods using saved settings if enabled
+                if list_type == "Inactive" and self.settings.save_inactive_mods_sort_state:
+                    sort_key = ModsPanelSortKey[self.settings.inactive_mods_sort_key]
+                    descending = self.settings.inactive_mods_sort_descending
                     uuids = sort_paths(
                         uuids,
-                        key=ModsPanelSortKey.FILESYSTEM_MODIFIED_TIME,
-                        descending=True,
+                        key=sort_key,
+                        descending=descending,
                         settings=self.settings,
                     )
+                else:
+                    if list_type == "Inactive":
+                        uuids = sort_paths(
+                            uuids,
+                            key=ModsPanelSortKey.FILESYSTEM_MODIFIED_TIME,
+                            descending=True,
+                            settings=self.settings,
+                        )
         # Disable updates and disconnect model signals during rebuild
         self.setUpdatesEnabled(False)
         # Temporarily disconnect model signals to avoid cascading updates and duplicate items
@@ -3847,35 +3849,46 @@ class ModListWidget(QListWidget):
         self.clear()
         self.paths = list()
         if uuids:  # Insert data...
-            for uuid_key in uuids:
-                if is_divider_uuid(uuid_key):
-                    continue
-                _mod = self.metadata_controller.get_mod(uuid_key)
-                mod_path = str(_mod.mod_path) if _mod and _mod.mod_path else uuid_key
+            with log_stage(f"recreate_mod_list[{list_type}].insert_items"):
+                # 优化:原实现每个 uuid 进入独立 session + get_or_create + update(内部 commit),
+                # 即 N 次 session 创建 + 2N 次 commit。改为单 session + 批量 upsert + 单次 commit。
                 aux_metadata_controller = (
                     AuxMetadataController.get_or_create_cached_instance(
                         self.settings.aux_db_path
                     )
                 )
+                # 第一阶段:收集所有 (uuid_key, mod_path) 对
+                uuid_to_mod_path: dict[str, str] = {}
+                for uuid_key in uuids:
+                    if is_divider_uuid(uuid_key):
+                        continue
+                    _mod = self.metadata_controller.get_mod(uuid_key)
+                    mod_path = (
+                        str(_mod.mod_path) if _mod and _mod.mod_path else uuid_key
+                    )
+                    uuid_to_mod_path[uuid_key] = mod_path
+
+                # 第二阶段:共享 session,批量 upsert(单次 commit)
                 with aux_metadata_controller.Session() as aux_metadata_session:
-                    aux_metadata_controller.get_or_create(
-                        aux_metadata_session, mod_path
-                    )
-                    aux_metadata_controller.update(
-                        aux_metadata_session, mod_path, outdated=False
-                    )
-                    list_item = CustomListWidgetItem(self)
-                    data = CustomListWidgetItemMetadata(
-                        path=uuid_key,
-                        list_type=self.list_type,
-                        aux_metadata_controller=aux_metadata_controller,
-                        aux_metadata_session=aux_metadata_session,
-                        settings=self.settings,
-                    )
-                    data.__dict__["show_tags"] = self.show_tags
-                list_item.setData(Qt.ItemDataRole.UserRole, data)
-                self.addItem(list_item)
-                # When refreshing, update entry if needed?
+                    if uuid_to_mod_path:
+                        aux_metadata_controller.upsert_many(
+                            aux_metadata_session,
+                            list(uuid_to_mod_path.values()),
+                            outdated=False,
+                        )
+                    # 第三阶段:在共享 session 内构造所有 item
+                    for uuid_key, mod_path in uuid_to_mod_path.items():
+                        list_item = CustomListWidgetItem(self)
+                        data = CustomListWidgetItemMetadata(
+                            path=uuid_key,
+                            list_type=self.list_type,
+                            aux_metadata_controller=aux_metadata_controller,
+                            aux_metadata_session=aux_metadata_session,
+                            settings=self.settings,
+                        )
+                        data.__dict__["show_tags"] = self.show_tags
+                        list_item.setData(Qt.ItemDataRole.UserRole, data)
+                        self.addItem(list_item)
             # Set uuids list to match the widget after all items are added
             self.paths = list(uuids)
 
