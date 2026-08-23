@@ -47,11 +47,7 @@ _NUITKA_CMD = [
     f"--include-data-dir={glob.glob('.venv/**/qtwebengine_locales', recursive=True)[0]}=qtwebengine_locales",
 ]
 
-if _SYSTEM == "Darwin" and _PROCESSOR in ["i386", "arm"]:
-    pass
-elif _SYSTEM == "Linux":
-    pass
-elif _SYSTEM == "Windows" and _ARCH == "64bit":
+if _SYSTEM == "Darwin" and _PROCESSOR in ["i386", "arm"] or _SYSTEM == "Linux" or _SYSTEM == "Windows" and _ARCH == "64bit":
     pass
 else:
     print(f"Unsupported SYSTEM: {_SYSTEM} {_ARCH} with {_PROCESSOR}")

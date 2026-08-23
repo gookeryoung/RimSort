@@ -4,11 +4,12 @@ import datetime
 import gc
 import threading
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Generator, List, Optional, Protocol, Tuple, cast
+from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -32,7 +33,7 @@ from app.views.dialogue import InformationBox
 class GitError(Exception):
     """Base exception for git operations."""
 
-    def __init__(self, message: str, details: Optional[str] = None):
+    def __init__(self, message: str, details: str | None = None):
         super().__init__(message)
         self.message = message
         self.details = details
@@ -60,7 +61,7 @@ class GitNotificationHandler(Protocol):
     """Protocol for handling git operation notifications."""
 
     def show_error(
-        self, title: str, message: str, details: Optional[str] = None
+        self, title: str, message: str, details: str | None = None
     ) -> None:
         """Show error notification to user."""
         ...
@@ -70,7 +71,7 @@ class DefaultNotificationHandler:
     """Default implementation using QMessageBox for notifications."""
 
     def show_error(
-        self, title: str, message: str, details: Optional[str] = None
+        self, title: str, message: str, details: str | None = None
     ) -> None:
         """Show error notification using InformationBox."""
         InformationBox(
@@ -86,7 +87,7 @@ class GitOperationConfig:
     """Configuration for git operations."""
 
     notify_errors: bool = True
-    notification_handler: Optional[GitNotificationHandler] = None
+    notification_handler: GitNotificationHandler | None = None
     fetch_timeout: int = 30  # Timeout for fetch operations in seconds
     connection_timeout: int = 10  # Timeout for connection checks in seconds
 
@@ -150,7 +151,7 @@ def _fetch_with_timeout(repo: Repository, remote: pygit2.Remote, timeout: int) -
         # Timeout occurred
         logger.warning(f"Fetch operation timed out after {timeout} seconds")
         # Prevent the repository from being freed while the C-level fetch is still running
-        setattr(repo, "_has_hanging_threads", True)
+        repo._has_hanging_threads = True
         return False
 
     if result["error"]:
@@ -195,8 +196,8 @@ def _is_repository_corrupted(repo_path: str | Path) -> bool:
 
 def _attempt_repository_repair(
     repo_path: str | Path,
-    repo_url: Optional[str] = None,
-    repo: Optional[Repository] = None,
+    repo_url: str | None = None,
+    repo: Repository | None = None,
 ) -> bool:
     """Attempt to repair or re-clone a corrupted repository.
 
@@ -282,9 +283,9 @@ def _handle_git_error(
     error: Exception,
     config: GitOperationConfig,
     context: str = "",
-    repo_path: Optional[str | Path] = None,
-    repo_url: Optional[str] = None,
-    repo: Optional[Repository] = None,
+    repo_path: str | Path | None = None,
+    repo_url: str | None = None,
+    repo: Repository | None = None,
     **kwargs: Any,
 ) -> bool:
     """Centralized error handling for git operations.
@@ -352,8 +353,8 @@ def _handle_git_error(
 
 @contextmanager
 def git_repository(
-    path: str | Path, config: Optional[GitOperationConfig] = None
-) -> Generator[Optional[Repository], None, None]:
+    path: str | Path, config: GitOperationConfig | None = None
+) -> Generator[Repository | None, None, None]:
     """Context manager for automatic repository cleanup.
 
     Args:
@@ -524,7 +525,7 @@ class GitStashResult(Enum):
         return self == GitStashResult.GIT_ERROR
 
 
-def get_config(config: Optional[GitOperationConfig]) -> GitOperationConfig:
+def get_config(config: GitOperationConfig | None) -> GitOperationConfig:
     """Helper to get or create a default GitOperationConfig."""
     if config is None:
         return GitOperationConfig()
@@ -532,8 +533,8 @@ def get_config(config: Optional[GitOperationConfig]) -> GitOperationConfig:
 
 
 def git_discover(
-    path: str | Path, config: Optional[GitOperationConfig] = None
-) -> Optional[Repository]:
+    path: str | Path, config: GitOperationConfig | None = None
+) -> Repository | None:
     """Discover a git repository at a given path.
 
     Args:
@@ -574,14 +575,14 @@ class ParsedGitUrl:
     """
 
     clone_url: str
-    branch: Optional[str]
+    branch: str | None
     repo_name: str
 
 
 _BROWSE_PATH_SEGMENTS = {"tree", "blob", "commit", "releases", "issues", "pull"}
 
 
-def parse_git_url(repo_url: str) -> Optional[ParsedGitUrl]:
+def parse_git_url(repo_url: str) -> ParsedGitUrl | None:
     """Parse a git URL, handling GitHub/GitLab browse URLs.
 
     Extracts the clone URL, optional branch, and repository name from URLs
@@ -615,7 +616,7 @@ def parse_git_url(repo_url: str) -> Optional[ParsedGitUrl]:
         return None
 
 
-def _parse_https_git_url(repo_url: str) -> Optional[ParsedGitUrl]:
+def _parse_https_git_url(repo_url: str) -> ParsedGitUrl | None:
     """Parse an HTTPS git URL, stripping browse-path suffixes."""
     parsed = urlparse(repo_url)
     segments = [s for s in parsed.path.strip("/").split("/") if s]
@@ -628,7 +629,7 @@ def _parse_https_git_url(repo_url: str) -> Optional[ParsedGitUrl]:
     repo_with_ext = segments[1]
     repo_name = repo_with_ext.removesuffix(".git")
 
-    branch: Optional[str] = None
+    branch: str | None = None
     if len(segments) >= 3 and segments[2] in _BROWSE_PATH_SEGMENTS:
         if segments[2] in ("tree", "blob") and len(segments) >= 4:
             branch = "/".join(segments[3:])
@@ -639,7 +640,7 @@ def _parse_https_git_url(repo_url: str) -> Optional[ParsedGitUrl]:
     return ParsedGitUrl(clone_url=clone_url, branch=branch, repo_name=repo_name)
 
 
-def _parse_ssh_git_url(repo_url: str) -> Optional[ParsedGitUrl]:
+def _parse_ssh_git_url(repo_url: str) -> ParsedGitUrl | None:
     """Parse an SSH git URL (git@host:user/repo.git)."""
     if ":" not in repo_url:
         return None
@@ -687,11 +688,11 @@ def git_get_repo_name(repo_url: str) -> str:
 def git_clone(
     repo_url: str,
     repo_path: str | Path,
-    checkout_branch: Optional[str] = None,
+    checkout_branch: str | None = None,
     depth: int = 1,
     force: bool = False,
-    config: Optional[GitOperationConfig] = None,
-) -> tuple[Optional[Repository], GitCloneResult]:
+    config: GitOperationConfig | None = None,
+) -> tuple[Repository | None, GitCloneResult]:
     """Clone a git repository.
 
     Args:
@@ -820,8 +821,8 @@ def git_clone(
 
 
 def git_check_updates(
-    repo: Repository, config: Optional[GitOperationConfig] = None
-) -> Optional[pygit2.Walker]:
+    repo: Repository, config: GitOperationConfig | None = None
+) -> pygit2.Walker | None:
     """Check for updates in a git repository in the current branch.
 
     Args:
@@ -854,7 +855,7 @@ def git_check_updates(
                 )
                 return None
         except Exception as e:
-            logger.error(f"Fetch operation failed: {str(e)}")
+            logger.error(f"Fetch operation failed: {e!s}")
             return None
 
         # Get current branch
@@ -903,10 +904,10 @@ def git_check_updates(
 def git_pull(
     repo: Repository,
     remote_name: str = "origin",
-    branch: Optional[str] = None,
+    branch: str | None = None,
     reset_working_tree: bool = True,
     force: bool = False,
-    config: Optional[GitOperationConfig] = None,
+    config: GitOperationConfig | None = None,
     stash_before_pull: bool = False,
 ) -> GitPullResult:
     """Pull updates from a git repository.
@@ -957,7 +958,7 @@ def git_pull(
                 )
                 return GitPullResult.GIT_ERROR
         except Exception as e:
-            logger.error(f"Fetch operation failed: {str(e)}")
+            logger.error(f"Fetch operation failed: {e!s}")
             # Check for corruption and attempt repair
             error_str = str(e).lower()
             if "object not found" in error_str or "missing object" in error_str:
@@ -1118,11 +1119,11 @@ def git_pull(
 def git_push(
     repo: Repository,
     remote_name: str = "origin",
-    branch: Optional[str] = None,
+    branch: str | None = None,
     force: bool = False,
-    config: Optional[GitOperationConfig] = None,
-    username: Optional[str] = None,
-    token: Optional[str] = None,
+    config: GitOperationConfig | None = None,
+    username: str | None = None,
+    token: str | None = None,
 ) -> GitPushResult:
     """Push updates to a git repository.
 
@@ -1206,9 +1207,9 @@ def git_push(
 def git_stage_commit(
     repo: Repository,
     message: str,
-    paths: Optional[List[str]] = None,
+    paths: list[str] | None = None,
     all: bool = False,
-    config: Optional[GitOperationConfig] = None,
+    config: GitOperationConfig | None = None,
 ) -> GitStageCommitResult:
     """Stage and commit changes in a git repository.
 
@@ -1290,7 +1291,6 @@ def git_stage_commit(
         except Exception:
             # This might be the first commit
             logger.debug("First commit or no parent - proceeding with commit")
-            pass
 
         # Create commit
         try:
@@ -1328,8 +1328,8 @@ def git_stage_commit(
 
 
 def git_get_status(
-    repo: Repository, config: Optional[GitOperationConfig] = None
-) -> Optional[dict[str, List[str | tuple[str, str]]]]:
+    repo: Repository, config: GitOperationConfig | None = None
+) -> dict[str, list[str | tuple[str, str]]] | None:
     """Get the status of files in a git repository.
 
     Args:
@@ -1352,7 +1352,7 @@ def git_get_status(
 
     try:
         status = repo.status()
-        status_dict: dict[str, List[str | tuple[str, str]]] = {
+        status_dict: dict[str, list[str | tuple[str, str]]] = {
             "staged": [],
             "unstaged": [],
             "untracked": [],
@@ -1398,9 +1398,9 @@ def git_get_status(
 
 def git_get_commit_info(
     repo: Repository,
-    commit_id: Optional[str] = None,
-    config: Optional[GitOperationConfig] = None,
-) -> Optional[dict[str, Any]]:
+    commit_id: str | None = None,
+    config: GitOperationConfig | None = None,
+) -> dict[str, Any] | None:
     """Get information about a specific commit.
 
     Args:
@@ -1490,11 +1490,11 @@ def git_cleanup(repo: Repository) -> None:
 
 def git_stash(
     repo: Repository,
-    message: Optional[str] = None,
+    message: str | None = None,
     apply: bool = False,
     drop: bool = False,
     pop: bool = False,
-    config: Optional[GitOperationConfig] = None,
+    config: GitOperationConfig | None = None,
 ) -> GitStashResult:
     """Stash changes in a git repository.
 
@@ -1573,8 +1573,8 @@ def git_stash(
 
 
 def git_stash_list(
-    repo: Repository, config: Optional[GitOperationConfig] = None
-) -> List[str]:
+    repo: Repository, config: GitOperationConfig | None = None
+) -> list[str]:
     """List stashes in the repository.
 
     Args:
@@ -1608,7 +1608,7 @@ def git_stash_list(
 def git_stash_drop(
     repo: Repository,
     stash_index: int,
-    config: Optional[GitOperationConfig] = None,
+    config: GitOperationConfig | None = None,
 ) -> GitStashResult:
     """Drop a stash from the repository.
 
@@ -1640,7 +1640,7 @@ def git_stash_drop(
 
 
 def git_has_uncommitted_changes(
-    repo: Repository, config: Optional[GitOperationConfig] = None
+    repo: Repository, config: GitOperationConfig | None = None
 ) -> bool:
     """Check if the repository has uncommitted changes.
 
@@ -1708,8 +1708,8 @@ def git_is_repository(path: str | Path) -> bool:
 
 
 def git_get_current_branch(
-    repo: Repository, config: Optional[GitOperationConfig] = None
-) -> Optional[str]:
+    repo: Repository, config: GitOperationConfig | None = None
+) -> str | None:
     """Get the current branch name.
 
     Args:
@@ -1740,8 +1740,8 @@ def git_get_current_branch(
 def git_get_remote_url(
     repo: Repository,
     remote_name: str = "origin",
-    config: Optional[GitOperationConfig] = None,
-) -> Optional[str]:
+    config: GitOperationConfig | None = None,
+) -> str | None:
     """Get the URL of a remote.
 
     Args:
@@ -1767,7 +1767,7 @@ def git_get_remote_url(
         return None
 
 
-def git_is_clean(repo: Repository, config: Optional[GitOperationConfig] = None) -> bool:
+def git_is_clean(repo: Repository, config: GitOperationConfig | None = None) -> bool:
     """Check if the working directory is clean (no uncommitted changes).
 
     Args:
@@ -1814,12 +1814,12 @@ def get_latest_commit_info(repo: Repository, short_format: bool = True) -> str:
             return "The HEAD is not a commit."
 
     except Exception as e:
-        return f"Latest commit info unavailable: {str(e)}"
+        return f"Latest commit info unavailable: {e!s}"
 
 
 def get_repository_latest_commit(
     repo_path: Path, config: GitOperationConfig
-) -> Tuple[bool, Optional[str], Optional[str]]:
+) -> tuple[bool, str | None, str | None]:
     try:
         with git_repository(repo_path, config) as repo:
             if repo is None:
@@ -1836,24 +1836,24 @@ def get_repository_latest_commit(
 
 __all__ = [
     "ParsedGitUrl",
-    "parse_git_url",
-    "git_check_updates",
-    "git_pull",
-    "git_push",
-    "git_stage_commit",
-    "git_get_status",
-    "git_get_commit_info",
-    "git_cleanup",
-    "git_repository",
-    "git_stash",
-    "git_stash_list",
-    "git_stash_drop",
-    "git_has_uncommitted_changes",
-    "git_is_repository",
-    "git_get_current_branch",
-    "git_get_remote_url",
-    "git_is_clean",
     "get_latest_commit_info",
     "get_repository_latest_commit",
+    "git_check_updates",
+    "git_cleanup",
+    "git_get_commit_info",
+    "git_get_current_branch",
+    "git_get_remote_url",
+    "git_get_status",
+    "git_has_uncommitted_changes",
+    "git_is_clean",
+    "git_is_repository",
+    "git_pull",
+    "git_push",
+    "git_repository",
+    "git_stage_commit",
+    "git_stash",
+    "git_stash_drop",
+    "git_stash_list",
+    "parse_git_url",
     "pygit2",
 ]

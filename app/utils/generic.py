@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import webbrowser
+from collections.abc import Callable, Generator
 from datetime import datetime
 from errno import EACCES
 from io import TextIOWrapper
@@ -11,7 +12,7 @@ from pathlib import Path
 from re import search, sub
 from stat import S_IRWXG, S_IRWXO, S_IRWXU
 from time import localtime, strftime
-from typing import Any, Callable, Generator
+from typing import Any
 
 import requests
 import vdf  # type: ignore
@@ -19,10 +20,10 @@ from loguru import logger
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
-import app.views.dialogue as dialogue
 from app.utils import http
 from app.utils.launch_command_parser import parse_launch_command
 from app.utils.platform.windows import scanpath_win32
+from app.views import dialogue
 
 translate = QCoreApplication.translate
 
@@ -136,7 +137,7 @@ def delete_files_with_condition(
     for root, dirs, files in os.walk(directory):
         for file in files:
             if condition(file):
-                file_path = str((Path(root) / file))
+                file_path = str(Path(root) / file)
                 try:
                     os.remove(file_path)
                 except OSError as e:
@@ -146,7 +147,7 @@ def delete_files_with_condition(
 
     for root, dirs, _ in os.walk(directory, topdown=False):
         for _dir in dirs:
-            dir_path = str((Path(root) / _dir))
+            dir_path = str(Path(root) / _dir)
             if not os.listdir(dir_path):
                 shutil.rmtree(
                     dir_path,

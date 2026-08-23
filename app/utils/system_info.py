@@ -56,7 +56,7 @@ class SystemInfo:
         Create a new instance or return the existing singleton instance of the `SystemInfo` class.
         """
         if not cls._instance:
-            cls._instance = super(SystemInfo, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self) -> None:
@@ -117,7 +117,6 @@ class UnsupportedOperatingSystemError(Exception):
     Exception raised when an unsupported operating system is detected.
     """
 
-    pass
 
 
 class UnsupportedArchitectureError(Exception):
@@ -125,4 +124,3 @@ class UnsupportedArchitectureError(Exception):
     Exception raised when an unsupported system architecture is detected.
     """
 
-    pass

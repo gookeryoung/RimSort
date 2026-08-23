@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from functools import wraps
 from typing import TypeVar

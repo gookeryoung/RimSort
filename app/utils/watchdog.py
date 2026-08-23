@@ -75,7 +75,7 @@ class WatchdogHandler(FileSystemEventHandler, QObject):
                 logger.warning("Watchdog Mods Observer is None. Unable to start.")
         except Exception as e:
             logger.warning(
-                f"Unable to start Watchdog Observer(s) due to exception: {str(e)}"
+                f"Unable to start Watchdog Observer(s) due to exception: {e!s}"
             )
 
     def stop(self) -> None:

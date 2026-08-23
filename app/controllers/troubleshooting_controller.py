@@ -1,9 +1,8 @@
 import json
 import re
-import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 from shutil import copy2, rmtree
-from typing import List, Optional
+from xml.etree import ElementTree
 
 from loguru import logger
 from PySide6.QtCore import QCoreApplication
@@ -62,19 +61,19 @@ class TroubleshootingController:
         )
 
     @property
-    def game_location(self) -> Optional[str]:
+    def game_location(self) -> str | None:
         return self.settings.instances[self.settings.current_instance].game_folder
 
     @property
-    def config_location(self) -> Optional[str]:
+    def config_location(self) -> str | None:
         return self.settings.instances[self.settings.current_instance].config_folder
 
     @property
-    def steam_mods_location(self) -> Optional[str]:
+    def steam_mods_location(self) -> str | None:
         return self.settings.instances[self.settings.current_instance].workshop_folder
 
     def _delete_files_in_directory(
-        self, directory: Path, exclude: Optional[List[str]] = None
+        self, directory: Path, exclude: list[str] | None = None
     ) -> None:
         """Helper method to delete files and folders in a directory, excluding specified names."""
         if exclude is None:
@@ -97,7 +96,7 @@ class TroubleshootingController:
         if not self.steam_mods_location:
             logger.warning("Steam user Check failed, skipping deleteing game files.")
             self.show_steam_user_warning()
-            return None
+            return
 
         # Check if game location is set
         if not self.game_location:
@@ -162,7 +161,7 @@ class TroubleshootingController:
         if not self.steam_mods_location:
             logger.warning("Steam mods location not set, skipping deleting steam mods.")
             self.show_steam_user_warning()
-            return None
+            return
 
         steam_mods_dir = Path(self.steam_mods_location)
         if not steam_mods_dir.exists():
@@ -585,7 +584,7 @@ class TroubleshootingController:
                 ).format(e=str(e)),
             )
 
-    def _get_steam_root_from_workshop(self) -> Optional[Path]:
+    def _get_steam_root_from_workshop(self) -> Path | None:
         """Get Steam root directory from configured workshop folder path."""
         if not self.steam_mods_location:
             logger.warning("Steam mods location not set, skipping getting steam root.")

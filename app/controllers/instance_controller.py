@@ -1,8 +1,9 @@
 import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from traceback import format_exc
-from typing import Any, Callable, Self
+from typing import Any, Self
 from zipfile import ZipFile
 
 import msgspec
@@ -305,11 +306,7 @@ class InstanceController(QObject):
         if "steamcmd_install_path" in invalid_paths:
             default_path = self.instance_folder_path / STEAMCMD_FOLDER_NAME
             if default_path.exists():
-                setattr(
-                    self.instance,
-                    "steamcmd_install_path",
-                    str(self.instance_folder_path),
-                )
+                self.instance.steamcmd_install_path = str(self.instance_folder_path)
                 invalid_paths.remove("steamcmd_install_path")
 
         return invalid_paths

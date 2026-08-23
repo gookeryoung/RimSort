@@ -1,7 +1,8 @@
 import os
+from collections.abc import Sequence
 from platform import system
 from re import compile, search
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.utils.steam.steamcmd.wrapper import SteamcmdInterface
@@ -44,8 +45,8 @@ class RunnerPanel(QWidget):
     def __init__(
         self,
         todds_dry_run_support: bool = False,
-        steamcmd_download_tracking: Optional[list[str]] = None,
-        steam_db: Optional[dict[str, Any]] = None,
+        steamcmd_download_tracking: list[str] | None = None,
+        steam_db: dict[str, Any] | None = None,
         auto_close_on_complete: bool = False,
     ):
         """
@@ -76,14 +77,14 @@ class RunnerPanel(QWidget):
         self.process_last_output = ""
         self.process_last_command = ""
         self.process_last_args: Sequence[str] = []
-        self.steamcmd_current_pfid: Optional[str] = None
+        self.steamcmd_current_pfid: str | None = None
         self.login_error = False
         self.redownloading = False
 
         # Batch-download state (populated by SteamcmdInterface.download_mods)
         self._pending_steamcmd_batches: list[list[str]] = []
         self._steamcmd_executable: str = ""
-        self._steamcmd_wrapper: Optional["SteamcmdInterface"] = None
+        self._steamcmd_wrapper: SteamcmdInterface | None = None
         self._steamcmd_batch_index: int = 1  # 1-based; first batch already sent
 
         # Set up UI components
@@ -289,7 +290,7 @@ class RunnerPanel(QWidget):
                 with open(file_path, "w", encoding="utf-8") as outfile:
                     outfile.write(self.text.toPlainText())
                 logger.info("Output successfully saved")
-            except IOError as e:
+            except OSError as e:
                 logger.error(f"Error writing to file: {e}")
 
         except Exception as e:
@@ -304,7 +305,7 @@ class RunnerPanel(QWidget):
         self,
         command: str,
         args: Sequence[str],
-        progress_bar: Optional[int] = None,
+        progress_bar: int | None = None,
     ) -> None:
         """
         Execute the given command in a new terminal-like GUI

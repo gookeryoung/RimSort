@@ -1,5 +1,6 @@
 import subprocess
-from typing import Any, Generator, Union
+from collections.abc import Generator
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,16 +21,9 @@ def _block_steam_urls(request: pytest.FixtureRequest) -> Generator[None, None, N
 
     def _guarded_popen(*args: Any, **kw: Any) -> subprocess.Popen[Any]:
         popen_args = args[0] if args else kw.get("args", "")
-        cmd_str = (
-            " ".join(str(x) for x in popen_args)
-            if isinstance(popen_args, (list, tuple))
-            else str(popen_args)
-        )
+        cmd_str = " ".join(str(x) for x in popen_args) if isinstance(popen_args, (list, tuple)) else str(popen_args)
         if "steam://" in cmd_str:
-            raise RuntimeError(
-                f"Test {request.node.nodeid} tried to open a steam:// URL "
-                f"via subprocess: {cmd_str}"
-            )
+            raise RuntimeError(f"Test {request.node.nodeid} tried to open a steam:// URL via subprocess: {cmd_str}")
         return _real_popen(*args, **kw)
 
     with patch.object(subprocess, "Popen", _guarded_popen):
@@ -51,7 +45,7 @@ def auto_accept_dialogs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(scope="function")
-def qapp() -> Generator[Union[QApplication, QCoreApplication], None, None]:
+def qapp() -> Generator[QApplication | QCoreApplication, None, None]:
     """Create a QApplication instance for Qt tests."""
     app = QApplication.instance()
     if app is None:

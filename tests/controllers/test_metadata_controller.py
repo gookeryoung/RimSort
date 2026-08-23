@@ -1,7 +1,8 @@
 import json
 import shutil
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import msgspec
@@ -84,12 +85,12 @@ def metadata_controller(
     ):
         steamcmd_instance.return_value = MagicMock(spec=SteamcmdInterface)
         steamcmd_instance.return_value.steamcmd_appworkshop_acf_path = str(
-            (
+            
                 Path("tests/data/instance/instance_1/steam")
                 / "steamapps"
                 / "workshop"
                 / "appworkshop_294100.acf"
-            )
+            
         )
         return MetadataController(mock_settings, lambda: mock_active_instance, temp_db)
 

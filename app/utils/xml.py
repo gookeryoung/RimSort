@@ -1,8 +1,8 @@
 import gzip
 import os
-import xml.dom.minidom as minidom
 import xml.etree.ElementTree as ET
 from typing import Any
+from xml.dom import minidom
 
 import zstandard as zstd
 from bs4 import BeautifulSoup

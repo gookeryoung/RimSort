@@ -1,9 +1,10 @@
 import os
 import re
 import traceback
+from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import msgspec
 from loguru import logger
@@ -138,7 +139,7 @@ def match_version(
     input: dict[str, str] | dict[str, list[str]],
     target_version: str,
     stop_at_first: bool = True,
-) -> tuple[bool, None | list[str] | list[str] | str]:
+) -> tuple[bool, None | list[str] | str]:
     """Attempts to match an input key with the target version using regex.
 
     If the key is not found, the function returns None.
@@ -156,9 +157,7 @@ def match_version(
         return False, None
 
     if stop_at_first:
-        if (result := input.get(version_regex, None)) and result is not None:
-            return True, result
-        elif (result := input.get(f"{major}.{minor}", None)) and result is not None:
+        if (result := input.get(version_regex, None)) and result is not None or (result := input.get(f"{major}.{minor}", None)) and result is not None:
             return True, result
 
     results = []
@@ -871,7 +870,7 @@ def write_rules_db(path: Path, external_rules: ExternalRulesSchema) -> None:
             json_string = msgspec.json.encode(external_rules)
             f.write(json_string)
             logger.info("Rules DB written successfully")
-    except (IOError, OSError) as e:
+    except OSError as e:
         logger.error(f"Error writing Rules DB: {e}")
         raise e
 
@@ -926,6 +925,6 @@ def write_steam_db(path: Path, steam_db: SteamDbSchema) -> None:
             json_string = msgspec.json.encode(steam_db)
             f.write(json_string)
             logger.info("SteamDB written successfully")
-    except (IOError, OSError) as e:
+    except OSError as e:
         logger.error(f"Error writing SteamDB: {e}")
         raise e

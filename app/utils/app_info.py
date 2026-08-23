@@ -30,7 +30,7 @@ class AppInfo:
         Create a new instance or return the existing singleton instance of the `AppInfo` class.
         """
         if not cls._instance:
-            cls._instance = super(AppInfo, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
 
     @staticmethod

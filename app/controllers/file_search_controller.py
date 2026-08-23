@@ -36,7 +36,7 @@ class SearchWorker(QThread):
         root_paths: list[str],
         pattern: str,
         options: dict[str, Any],
-        active_mod_ids: Optional[set[str]] = None,
+        active_mod_ids: set[str] | None = None,
         scope: str = "all mods",
     ) -> None:
         """
@@ -221,7 +221,7 @@ class SearchWorker(QThread):
             except UnicodeDecodeError:
                 # Try the next encoding
                 continue
-            except IOError as e:
+            except OSError as e:
                 logger.warning(f"Error reading file {file_path}: {e}")
                 return ""
 
@@ -595,7 +595,7 @@ class FileSearchController(QObject):
         settings: Settings,
         dialog: FileSearchDialog,
         metadata_controller: MetadataController,
-        active_mod_ids: Optional[set[str]] = None,
+        active_mod_ids: set[str] | None = None,
     ) -> None:
         """
         Initialize the FileSearchController.
@@ -618,7 +618,7 @@ class FileSearchController(QObject):
             active_mod_ids or set()
         )  # This is used for the controller, not the worker
         self.search_results: list[SearchResult] = []
-        self.search_worker: Optional[SearchWorker] = None
+        self.search_worker: SearchWorker | None = None
         self.searcher = FileSearch(metadata_controller=metadata_controller)
 
         # connect signals
@@ -672,7 +672,7 @@ class FileSearchController(QObject):
         root_paths: list[str],
         pattern: str,
         options: dict[str, Any],
-        active_mod_ids: Optional[set[str]] = None,
+        active_mod_ids: set[str] | None = None,
         scope: str = "all mods",
     ) -> SearchWorker:
         """
@@ -842,7 +842,7 @@ class FileSearchController(QObject):
         root_paths: list[str],
         search_text: str,
         options: dict[str, Any],
-        mod_ids: Optional[set[str]] = None,
+        mod_ids: set[str] | None = None,
         scope: str = "all mods",
     ) -> None:
         """

@@ -40,7 +40,6 @@ class GitHubModEntry(Base):
 class CacheBase(DeclarativeBase):
     """Separate base for the global release cache DB."""
 
-    pass
 
 
 class GitHubReleaseCache(CacheBase):

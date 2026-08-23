@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable
+from typing import Any
 
 from loguru import logger
 from PySide6.QtCore import (
@@ -571,14 +572,7 @@ class RuleEditor(QWidget):
             self.external_community_rules_loadBottom_checkbox.setCheckable(False)
             self.external_user_rules_loadBottom_checkbox.setCheckable(False)
         # Initial mode
-        if self.initial_mode == "community_rules":
-            self._toggle_details_layout_widgets(
-                layout=self.external_community_rules_layout, override=False
-            )
-            self._toggle_details_layout_widgets(
-                layout=self.external_user_rules_layout, override=False
-            )
-        elif self.initial_mode == "user_rules":
+        if self.initial_mode == "community_rules" or self.initial_mode == "user_rules":
             self._toggle_details_layout_widgets(
                 layout=self.external_community_rules_layout, override=False
             )
@@ -808,11 +802,7 @@ class RuleEditor(QWidget):
                 metadata[self.edit_packageid][instruction[3]][instruction[1]][
                     "comment"
                 ] = instruction[4]
-            elif instruction[3] == "loadTop":
-                metadata[self.edit_packageid][instruction[3]]["comment"] = instruction[
-                    4
-                ]
-            elif instruction[3] == "loadBottom":
+            elif instruction[3] == "loadTop" or instruction[3] == "loadBottom":
                 metadata[self.edit_packageid][instruction[3]]["comment"] = instruction[
                     4
                 ]

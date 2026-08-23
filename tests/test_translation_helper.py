@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -140,7 +140,7 @@ class TestTranslationConfig:
 
     def test_translation_config_from_dict(self) -> None:
         """Test TranslationConfig.from_dict creates config from dictionary."""
-        config_dict: Dict[str, Any] = {
+        config_dict: dict[str, Any] = {
             "retry": {"max_retries": 5, "initial_delay": 0.5},
             "timeout": {"deepl_timeout": 20.0},
             "max_concurrent_requests": 10,
@@ -533,31 +533,25 @@ class TestAutoTranslateFile:
     """Tests for auto_translate_file function."""
 
     @pytest.fixture
-    def mock_filesystem(self, mocker: Any) -> Dict[str, Any]:
+    def mock_filesystem(self, mocker: Any) -> dict[str, Any]:
         """Fixture to mock filesystem operations."""
         mock_exists = mocker.patch("pathlib.Path.exists", return_value=True)
         mock_is_dir = mocker.patch("pathlib.Path.is_dir", return_value=False)
         mock_is_file = mocker.patch("pathlib.Path.is_file", return_value=True)
-        mock_glob = mocker.patch(
-            "pathlib.Path.glob", return_value=[Path("locales/zh_CN.ts")]
-        )
+        mock_glob = mocker.patch("pathlib.Path.glob", return_value=[Path("locales/zh_CN.ts")])
         mock_copy2 = mocker.patch("shutil.copy2")
         mock_unlink = mocker.patch("pathlib.Path.unlink")
         mock_mkdir = mocker.patch("pathlib.Path.mkdir", return_value=None)
 
         # Mock open for reading/writing file content
-        file_content: Dict[str, Any] = {}  # Stores content of mocked files
+        file_content: dict[str, Any] = {}  # Stores content of mocked files
 
-        def mock_open_func(
-            file_path: Any, mode: str = "r", encoding: str = "utf-8"
-        ) -> Any:
+        def mock_open_func(file_path: Any, mode: str = "r", encoding: str = "utf-8") -> Any:
             if "w" in mode:
                 # Simulate writing to a file
                 file_content[str(file_path)] = []
                 mock_file = mocker.mock_open()
-                mock_file.return_value.write.side_effect = lambda data: file_content[
-                    str(file_path)
-                ].append(data)
+                mock_file.return_value.write.side_effect = lambda data: file_content[str(file_path)].append(data)
                 return mock_file.return_value
             else:
                 # Simulate reading from a file
@@ -578,7 +572,7 @@ class TestAutoTranslateFile:
         }
 
     @pytest.fixture
-    def mock_xml_parsing(self, mocker: Any) -> Dict[str, Any]:
+    def mock_xml_parsing(self, mocker: Any) -> dict[str, Any]:
         """Fixture to mock lxml.etree operations."""
         mock_tree = mocker.Mock()
         mock_root = mocker.Mock()
@@ -626,35 +620,27 @@ class TestAutoTranslateFile:
     async def test_auto_translate_file_success(
         self,
         mocker: Any,
-        mock_filesystem: Dict[str, Any],
-        mock_xml_parsing: Dict[str, Any],
+        mock_filesystem: dict[str, Any],
+        mock_xml_parsing: dict[str, Any],
         mock_translation_service: Any,
         mock_find_unfinished: list[Any],
     ) -> None:
         """Test successful auto-translation scenario."""
         # Arrange
-        mock_find_unfinished.extend(
-            [
-                UnfinishedItem(
-                    context="MyContext", source="Hello", element=mocker.Mock(attrib={})
-                ),
-                UnfinishedItem(
-                    context="MyContext", source="World", element=mocker.Mock(attrib={})
-                ),
-            ]
-        )
+        mock_find_unfinished.extend([
+            UnfinishedItem(context="MyContext", source="Hello", element=mocker.Mock(attrib={})),
+            UnfinishedItem(context="MyContext", source="World", element=mocker.Mock(attrib={})),
+        ])
         mock_translation_service.translate.side_effect = ["你好", "世界"]
         mocker.patch("asyncio.sleep")
 
         # Mock the XML structure for content writing
         mock_xml_parsing["root"].findall.return_value = []  # No contexts initially
-        mock_xml_parsing["tree"].write.side_effect = (
-            lambda file, encoding, xml_declaration: (
-                mock_filesystem["file_content"]
-                .setdefault(str(file), [])
-                .append(
-                    "<TS><context><name>MyContext</name><message><source>Hello</source><translation>你好</translation></message><message><source>World</source><translation>世界</translation></message></context></TS>"
-                )
+        mock_xml_parsing["tree"].write.side_effect = lambda file, encoding, xml_declaration: (
+            mock_filesystem["file_content"]
+            .setdefault(str(file), [])
+            .append(
+                "<TS><context><name>MyContext</name><message><source>Hello</source><translation>你好</translation></message><message><source>World</source><translation>世界</translation></message></context></TS>"
             )
         )
 
@@ -663,15 +649,11 @@ class TestAutoTranslateFile:
 
         # Assert
         assert result is True
-        mock_filesystem["copy2"].assert_called_once_with(
-            Path("locales/zh_CN.ts"), Path("locales/zh_CN.ts.backup")
-        )
-        mock_translation_service.translate.assert_has_calls(
-            [
-                mocker.call("Hello", "zh_CN", "en_US"),
-                mocker.call("World", "zh_CN", "en_US"),
-            ]
-        )
+        mock_filesystem["copy2"].assert_called_once_with(Path("locales/zh_CN.ts"), Path("locales/zh_CN.ts.backup"))
+        mock_translation_service.translate.assert_has_calls([
+            mocker.call("Hello", "zh_CN", "en_US"),
+            mocker.call("World", "zh_CN", "en_US"),
+        ])
         assert mock_find_unfinished[0].element.text == "你好"
         assert "type" not in mock_find_unfinished[0].element.attrib
         mock_xml_parsing["tree"].write.assert_called_once_with(
@@ -683,8 +665,8 @@ class TestAutoTranslateFile:
     async def test_auto_translate_file_dry_run(
         self,
         mocker: Any,
-        mock_filesystem: Dict[str, Any],
-        mock_xml_parsing: Dict[str, Any],
+        mock_filesystem: dict[str, Any],
+        mock_xml_parsing: dict[str, Any],
         mock_translation_service: Any,
         mock_find_unfinished: list[Any],
         capsys: Any,  # To capture print output
@@ -693,13 +675,9 @@ class TestAutoTranslateFile:
         # Arrange
         mock_element = mocker.Mock()
         mock_element.text = None
-        mock_find_unfinished.extend(
-            [
-                UnfinishedItem(
-                    context="MyContext", source="Hello", element=mock_element
-                ),
-            ]
-        )
+        mock_find_unfinished.extend([
+            UnfinishedItem(context="MyContext", source="Hello", element=mock_element),
+        ])
         mock_translation_service.translate.return_value = "你好"
         mocker.patch("asyncio.sleep")
 
@@ -710,9 +688,7 @@ class TestAutoTranslateFile:
         assert result is True  # Dry-run success doesn't depend on actual saves
         mock_filesystem["copy2"].assert_not_called()
         mock_translation_service.translate.assert_called_once()
-        assert (
-            mock_find_unfinished[0].element.text is None
-        )  # Element not updated in dry run
+        assert mock_find_unfinished[0].element.text is None  # Element not updated in dry run
         mock_xml_parsing["tree"].write.assert_not_called()
         mock_filesystem["unlink"].assert_not_called()
 
@@ -727,23 +703,17 @@ class TestAutoTranslateFile:
     async def test_auto_translate_file_failure_no_continue(
         self,
         mocker: Any,
-        mock_filesystem: Dict[str, Any],
-        mock_xml_parsing: Dict[str, Any],
+        mock_filesystem: dict[str, Any],
+        mock_xml_parsing: dict[str, Any],
         mock_translation_service: Any,
         mock_find_unfinished: list[Any],
     ) -> None:
         """Test auto-translation aborts and restores backup on failure when continue_on_failure is False."""
         # Arrange
-        mock_find_unfinished.extend(
-            [
-                UnfinishedItem(
-                    context="MyContext", source="Hello", element=mocker.Mock()
-                ),
-                UnfinishedItem(
-                    context="MyContext", source="World", element=mocker.Mock()
-                ),
-            ]
-        )
+        mock_find_unfinished.extend([
+            UnfinishedItem(context="MyContext", source="Hello", element=mocker.Mock()),
+            UnfinishedItem(context="MyContext", source="World", element=mocker.Mock()),
+        ])
         # First translation succeeds, second fails
         mock_translation_service.translate.side_effect = [
             "你好",
@@ -758,20 +728,16 @@ class TestAutoTranslateFile:
         set_translation_config(test_config)
 
         # Act
-        result = await auto_translate_file(
-            "zh_CN", service_name="google", continue_on_failure=False
-        )
+        result = await auto_translate_file("zh_CN", service_name="google", continue_on_failure=False)
 
         # Assert
         assert result is False
         # copy2 is called twice: once for backup, once for restore
         assert mock_filesystem["copy2"].call_count == 2
-        mock_translation_service.translate.assert_has_calls(
-            [
-                mocker.call("Hello", "zh_CN", "en_US"),
-                mocker.call("World", "zh_CN", "en_US"),
-            ]
-        )
+        mock_translation_service.translate.assert_has_calls([
+            mocker.call("Hello", "zh_CN", "en_US"),
+            mocker.call("World", "zh_CN", "en_US"),
+        ])
         mock_xml_parsing["tree"].write.assert_not_called()  # File should not be saved
         # Backup should be restored (simulated by not unlinking and printing message)
         # Note: The mock_filesystem["copy2"] from the finally block would be for restoring
@@ -784,23 +750,17 @@ class TestAutoTranslateFile:
     async def test_auto_translate_file_failure_with_continue(
         self,
         mocker: Any,
-        mock_filesystem: Dict[str, Any],
-        mock_xml_parsing: Dict[str, Any],
+        mock_filesystem: dict[str, Any],
+        mock_xml_parsing: dict[str, Any],
         mock_translation_service: Any,
         mock_find_unfinished: list[Any],
     ) -> None:
         """Test auto-translation saves partial results on failure when continue_on_failure is True."""
         # Arrange
-        mock_find_unfinished.extend(
-            [
-                UnfinishedItem(
-                    context="MyContext", source="Hello", element=mocker.Mock()
-                ),
-                UnfinishedItem(
-                    context="MyContext", source="World", element=mocker.Mock()
-                ),
-            ]
-        )
+        mock_find_unfinished.extend([
+            UnfinishedItem(context="MyContext", source="Hello", element=mocker.Mock()),
+            UnfinishedItem(context="MyContext", source="World", element=mocker.Mock()),
+        ])
         # First translation succeeds, second fails
         mock_translation_service.translate.side_effect = [
             "你好",
@@ -810,32 +770,24 @@ class TestAutoTranslateFile:
 
         # Mock the XML structure for content writing
         mock_xml_parsing["root"].findall.return_value = []  # No contexts initially
-        mock_xml_parsing["tree"].write.side_effect = (
-            lambda file, encoding, xml_declaration: mock_filesystem["file_content"][
-                str(file)
-            ].append(
-                "<TS><context><name>MyContext</name><message><source>Hello</source><translation>你好</translation></message><message><source>World</source><translation type='unfinished'></translation></message></context></TS>"
-            )
+        mock_xml_parsing["tree"].write.side_effect = lambda file, encoding, xml_declaration: mock_filesystem[
+            "file_content"
+        ][str(file)].append(
+            "<TS><context><name>MyContext</name><message><source>Hello</source><translation>你好</translation></message><message><source>World</source><translation type='unfinished'></translation></message></context></TS>"
         )
 
         # Act
         # continue_on_failure is True by default for auto_translate_file
-        result = await auto_translate_file(
-            "zh_CN", service_name="google", continue_on_failure=True
-        )
+        result = await auto_translate_file("zh_CN", service_name="google", continue_on_failure=True)
 
         # Assert
-        assert (
-            result is False
-        )  # Because one translation failed, overall result is False
+        assert result is False  # Because one translation failed, overall result is False
         # copy2 is called once for backup and once for restore (due to save error)
         assert mock_filesystem["copy2"].call_count == 2
-        mock_translation_service.translate.assert_has_calls(
-            [
-                mocker.call("Hello", "zh_CN", "en_US"),
-                mocker.call("World", "zh_CN", "en_US"),
-            ]
-        )
+        mock_translation_service.translate.assert_has_calls([
+            mocker.call("Hello", "zh_CN", "en_US"),
+            mocker.call("World", "zh_CN", "en_US"),
+        ])
         assert mock_find_unfinished[0].element.text == "你好"  # First one translated
         # Second element is a mock, so it will have a Mock object, not None
         # The actual code updates it during processing
@@ -847,24 +799,18 @@ class TestAutoTranslateFile:
     async def test_auto_translate_file_unexpected_exception(
         self,
         mocker: Any,
-        mock_filesystem: Dict[str, Any],
-        mock_xml_parsing: Dict[str, Any],
+        mock_filesystem: dict[str, Any],
+        mock_xml_parsing: dict[str, Any],
         mock_translation_service: Any,
         mock_find_unfinished: list[Any],
     ) -> None:
         """Test auto-translation restores backup if an unexpected exception occurs."""
         # Arrange
-        mock_find_unfinished.extend(
-            [
-                UnfinishedItem(
-                    context="MyContext", source="Hello", element=mocker.Mock()
-                ),
-            ]
-        )
+        mock_find_unfinished.extend([
+            UnfinishedItem(context="MyContext", source="Hello", element=mocker.Mock()),
+        ])
         # Simulate an unexpected exception during processing loop
-        mock_translation_service.translate.side_effect = Exception(
-            "Unexpected error outside translation"
-        )
+        mock_translation_service.translate.side_effect = Exception("Unexpected error outside translation")
         mocker.patch("asyncio.sleep")
 
         # Act
@@ -884,8 +830,8 @@ class TestAutoTranslateFile:
     async def test_auto_translate_file_no_unfinished_translations(
         self,
         mocker: Any,
-        mock_filesystem: Dict[str, Any],
-        mock_xml_parsing: Dict[str, Any],
+        mock_filesystem: dict[str, Any],
+        mock_xml_parsing: dict[str, Any],
         mock_translation_service: Any,
         mock_find_unfinished: list[Any],
     ) -> None:
@@ -921,9 +867,7 @@ class TestCreateTranslationService:
         mocker.patch("translation_helper.GoogleTranslator", mocker.Mock())
 
         mock_service = mocker.Mock()
-        mocker.patch(
-            "translation_helper.GoogleTranslateService", return_value=mock_service
-        )
+        mocker.patch("translation_helper.GoogleTranslateService", return_value=mock_service)
 
         result = create_translation_service("google")
 
@@ -1084,35 +1028,25 @@ class TestProcessLanguage:
     """Tests for process_language function."""
 
     @pytest.fixture
-    def mock_filesystem(self, mocker: Any) -> Dict[str, Any]:
+    def mock_filesystem(self, mocker: Any) -> dict[str, Any]:
         """Fixture to mock filesystem operations."""
         mock_exists = mocker.patch("pathlib.Path.exists", return_value=True)
-        mock_glob = mocker.patch(
-            "pathlib.Path.glob", return_value=[Path("locales/zh_CN.ts")]
-        )
+        mock_glob = mocker.patch("pathlib.Path.glob", return_value=[Path("locales/zh_CN.ts")])
         return {"exists": mock_exists, "glob": mock_glob}
 
     @pytest.mark.asyncio
-    async def test_process_language_success(
-        self, mocker: Any, mock_filesystem: Dict[str, Any]
-    ) -> None:
+    async def test_process_language_success(self, mocker: Any, mock_filesystem: dict[str, Any]) -> None:
         """Test successful language processing."""
-        mock_auto_translate = mocker.patch(
-            "translation_helper.auto_translate_file", return_value=True
-        )
+        mock_auto_translate = mocker.patch("translation_helper.auto_translate_file", return_value=True)
         mock_lupdate = mocker.patch("translation_helper.run_lupdate", return_value=True)
-        mock_lrelease = mocker.patch(
-            "translation_helper.run_lrelease", return_value=True
-        )
+        mock_lrelease = mocker.patch("translation_helper.run_lrelease", return_value=True)
 
         result = await process_language("zh_CN", "google", dry_run=False)
 
         assert result is True  # Process successful
         mock_lupdate.assert_called_once_with("zh_CN")
         # auto_translate_file is called with positional args: language, service, continue_on_failure
-        mock_auto_translate.assert_called_once_with(
-            "zh_CN", "google", True, dry_run=False
-        )
+        mock_auto_translate.assert_called_once_with("zh_CN", "google", True, dry_run=False)
         mock_lrelease.assert_called_once_with("zh_CN")
 
     @pytest.mark.asyncio

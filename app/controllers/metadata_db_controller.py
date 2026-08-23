@@ -1,5 +1,6 @@
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import create_engine, text

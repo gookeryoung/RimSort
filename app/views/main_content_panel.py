@@ -6,9 +6,10 @@ import tempfile
 import time
 import traceback
 import webbrowser
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, cast, overload
+from typing import Any, Literal, Optional, cast, overload
 
 from loguru import logger
 from PySide6.QtCore import (
@@ -31,7 +32,6 @@ from PySide6.QtWidgets import (
 )
 
 import app.utils.constants as app_constants
-import app.views.dialogue as dialogue
 from app.controllers.metadata_controller import MetadataController
 from app.controllers.sort_controller import Sorter
 from app.controllers.todds_controller import ToddsController
@@ -82,6 +82,7 @@ from app.utils.zip_extractor import (
     ZipExtractThread,
     get_zip_contents,
 )
+from app.views import dialogue
 from app.views.mod_info_panel import ModInfoPanel
 from app.views.mods_panel import (
     ModListWidget,
@@ -117,7 +118,7 @@ class MainContent(QObject):
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "MainContent":
         if cls._instance is None:
-            cls._instance = super(MainContent, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(
@@ -323,7 +324,7 @@ class MainContent(QObject):
         self.active_mods_uuids_restore_state: list[str] = []
         self.inactive_mods_uuids_restore_state: list[str] = []
         self.duplicate_mods: dict[str, Any] = {}
-        self._extract_progress_widget: Optional[TaskProgressWindow] = None
+        self._extract_progress_widget: TaskProgressWindow | None = None
         self.window_manager = WindowManager(self.metadata_controller)
         self._active_loading_loop: QEventLoop | None = None
         self._refresh_in_progress: bool = False
@@ -725,14 +726,14 @@ class MainContent(QObject):
             self.missing_mods,
         ) = self.metadata_controller.get_mods_from_list(
             mod_list=str(
-                (
+                
                     Path(
                         self.settings.instances[
                             self.settings.current_instance
                         ].config_folder
                     )
                     / "ModsConfig.xml"
-                )
+                
             )
         )
         self.active_mods_uuids_last_save = active_mods_uuids
@@ -2806,7 +2807,7 @@ class MainContent(QObject):
             logger.warning(
                 f"Tried to access instance {self.settings.current_instance} that does not exist!"
             )
-            return None
+            return
 
         steamcmd_prefix = instance.steamcmd_install_path
 
@@ -2864,7 +2865,6 @@ class MainContent(QObject):
                 logger.info(
                     "User chose to ignore unsaved changes and proceed with running the game anyway."
                 )
-                pass
             elif answer == QMessageBox.StandardButton.Cancel:
                 logger.info("User chose to cancel.")
                 return

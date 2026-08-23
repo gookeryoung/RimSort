@@ -109,7 +109,7 @@ class RentryUpload:
         except Exception as e:
             # Handle any other exceptions that occur during the process
             logger.error(
-                f"An error occurred while Uploading rentry.co content: {str(e)}"
+                f"An error occurred while Uploading rentry.co content: {e!s}"
             )
             show_fatal_error(
                 title=translate("RentryUpload", "Error"),
@@ -271,7 +271,7 @@ class RentryImport:
                 ]
                 logger.info("Parsed package_ids successfully.")
                 logger.debug(
-                    f"Number of package_ids found: {str(len(self.package_ids))}"
+                    f"Number of package_ids found: {len(self.package_ids)!s}"
                 )
                 # Define regex pattern for publishedfileid in format '?id=digits'
                 publishedfileid_pattern = r"\?id=(\d+)"
@@ -281,7 +281,7 @@ class RentryImport:
                 )
                 logger.info("Parsed publishedfileid successfully.")
                 logger.debug(
-                    f"Number of publishedfileid found: {str(len(self.publishedfileids))}"
+                    f"Number of publishedfileid found: {len(self.publishedfileids)!s}"
                 )
             else:
                 # Handle non-200 responses
@@ -293,7 +293,7 @@ class RentryImport:
         except Exception as e:
             # Handle any other exceptions that occur during the process
             logger.error(
-                f"An error occurred while fetching rentry.co content: {str(e)}"
+                f"An error occurred while fetching rentry.co content: {e!s}"
             )
             show_fatal_error(
                 title=translate("RentryImport", "Error"),
@@ -364,16 +364,15 @@ class RentryError:
         Args:
             e (Exception): The exception that occurred during the network operation.
         """
-        logger.error(f"A network error occurred while processing Rentry: {str(e)}")
+        logger.error(f"A network error occurred while processing Rentry: {e!s}")
         show_warning(
             title=translate("RentryError", "Network Error"),
             text=translate(
                 "RentryError",
                 "Network error occurred while processing Rentry, Please check your internet connection.",
             ),
-            details=f"{str(e)}",
+            details=f"{e!s}",
         )
-        return None  # Return None to indicate failure
 
     def show_missing_rentry_auth_warning(self) -> None:
         """Show a warning for missing Rentry Auth code."""

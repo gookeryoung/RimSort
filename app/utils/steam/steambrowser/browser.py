@@ -326,7 +326,7 @@ class SteamBrowser(QWidget):
                 ),
                 information=f"Url: {self.current_url}",
             )
-            return None
+            return
         # If there is extra data after the PFID, strip it
         if self.searchtext_string in publishedfileid:
             publishedfileid = publishedfileid.split(self.searchtext_string)[0]

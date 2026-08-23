@@ -1,7 +1,8 @@
 from collections import defaultdict
+from collections.abc import Generator
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Generator, Optional
+from typing import Any
 
 from loguru import logger
 from PySide6.QtCore import QCoreApplication
@@ -43,7 +44,7 @@ class ModGroupItem:
 
     mod_id: str
     metadata: dict[str, Any]
-    replacement: Optional[ReplacementInfo] = None
+    replacement: ReplacementInfo | None = None
 
 
 class UseThisInsteadPanel(BaseModsPanel):

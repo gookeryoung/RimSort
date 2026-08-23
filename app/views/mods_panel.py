@@ -5,7 +5,7 @@ from functools import partial
 from pathlib import Path
 from shutil import copy2, copytree
 from traceback import format_exc
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 from loguru import logger
 from platformdirs import PlatformDirs
@@ -84,7 +84,6 @@ from app.utils.aux_db_utils import (
     auxdb_update_all_mod_colors,
     auxdb_update_mod_color,
 )
-from app.utils.perf_timing import log_stage
 from app.utils.constants import (
     KNOWN_MOD_REPLACEMENTS,
 )
@@ -102,6 +101,7 @@ from app.utils.generic import (
     platform_specific_open,
     sanitize_filename,
 )
+from app.utils.perf_timing import log_stage
 from app.utils.startup_impact import (
     IMPACT_HIGH_THRESHOLD_S,
     IMPACT_WARN_THRESHOLD_S,
@@ -163,7 +163,7 @@ class ModListItemInner(QWidget):
         :param mod_color: QColor, the color of the mod's text/background in the modlist
         """
 
-        super(ModListItemInner, self).__init__()
+        super().__init__()
 
         # Used to handle hover, select etc. behavior for this custom widget
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
@@ -775,7 +775,7 @@ class ModListItemInner(QWidget):
         :param init: bool, if running inside __init__ method, uses class attribute.
 
         """
-        new_mod_color_name: Optional[str] = None
+        new_mod_color_name: str | None = None
         if self.settings.color_background_instead_of_text_toggle:
             # Color background
             if init:
@@ -1119,7 +1119,7 @@ class ModListWidget(QListWidget):
 
         self.settings = settings
 
-        super(ModListWidget, self).__init__()
+        super().__init__()
 
         # Track when a custom widget (ModListItemInner) is selected/not selected
         self.selectionModel().selectionChanged.connect(self.on_selection_changed)
@@ -1703,7 +1703,7 @@ class ModListWidget(QListWidget):
             # Get all selected CustomListWidgetItems
             selected_items = self.selectedItems()
             # Track all paths selected
-            all_selected_paths: Dict[int, str] = {}
+            all_selected_paths: dict[int, str] = {}
             # Single item selected
             if len(selected_items) == 1:
                 logger.debug(f"{len(selected_items)} items selected")
@@ -2140,8 +2140,8 @@ class ModListWidget(QListWidget):
                         folder_name,
                         publishedfileid,
                     ) in local_steamcmd_name_to_publishedfileid.items():
-                        original_mod_path = str((Path(local_folder) / folder_name))
-                        renamed_mod_path = str((Path(local_folder) / publishedfileid))
+                        original_mod_path = str(Path(local_folder) / folder_name)
+                        renamed_mod_path = str(Path(local_folder) / publishedfileid)
                         if os.path.exists(original_mod_path):
                             if not os.path.exists(renamed_mod_path):
                                 try:
@@ -2177,8 +2177,8 @@ class ModListWidget(QListWidget):
                             if mod_name
                             else f"{publishedfileid}_local"
                         )
-                        original_mod_path = str((Path(local_folder) / publishedfileid))
-                        renamed_mod_path = str((Path(local_folder) / mod_name))
+                        original_mod_path = str(Path(local_folder) / publishedfileid)
+                        renamed_mod_path = str(Path(local_folder) / mod_name)
                         if os.path.exists(original_mod_path):
                             if not os.path.exists(renamed_mod_path):
                                 try:
@@ -2265,7 +2265,7 @@ class ModListWidget(QListWidget):
                         if mod_name:
                             mod_name = sanitize_filename(mod_name)
                         renamed_mod_path = str(
-                            (
+                            
                                 Path(
                                     self.settings.instances[
                                         self.settings.current_instance
@@ -2276,7 +2276,7 @@ class ModListWidget(QListWidget):
                                     if mod_name
                                     else publishedfileid_from_folder_name
                                 )
-                            )
+                            
                         )
                         if os.path.exists(path):
                             try:
@@ -4139,7 +4139,7 @@ class ModsPanel(QWidget):
         Create a ListWidget using the dict of mods. This will
         create a row for every key-value pair in the dict.
         """
-        super(ModsPanel, self).__init__()
+        super().__init__()
 
         # Cache MetadataController instance and initialize panel
         logger.debug("Initializing ModsPanel")
@@ -4157,18 +4157,16 @@ class ModsPanel(QWidget):
             self.inactive_mods_sort_descending = True
 
         # Background folder-size sorting state
-        self._size_progress_dialog: Optional[QProgressDialog] = None
-        self._size_thread: Optional[QThread] = None
-        self._size_worker: Optional[FolderSizeWorker] = None
+        self._size_progress_dialog: QProgressDialog | None = None
+        self._size_thread: QThread | None = None
+        self._size_worker: FolderSizeWorker | None = None
         self._size_current_uuids: list[str] = []
 
         # Debounce timer for non-heavy sort operations
         self._sort_debounce_timer = QTimer()
         self._sort_debounce_timer.setSingleShot(True)
         self._sort_debounce_timer.timeout.connect(self._execute_pending_sort)
-        self._pending_sort_params: Optional[
-            tuple[str, list[str], ModsPanelSortKey, bool]
-        ] = None
+        self._pending_sort_params: tuple[str, list[str], ModsPanelSortKey, bool] | None = None
 
         # Base layout with a splitter for resizable mod lists
         self.panel = QVBoxLayout()
@@ -5194,9 +5192,7 @@ class ModsPanel(QWidget):
                 and search_filter == "name"
                 and self.settings.include_mod_notes_in_mod_name_filter
             ):
-                if not pattern.strip():
-                    item_filtered = False
-                elif (
+                if not pattern.strip() or (
                     pattern and mod_obj.name and pattern.lower() in mod_obj.name.lower()
                 ):
                     item_filtered = False
@@ -5240,9 +5236,7 @@ class ModsPanel(QWidget):
             # Type filtering (string-based from FilterState)
             if not item_filtered and fs.mod_type != "all":
                 is_csharp = mod_obj.c_sharp_mod
-                if fs.mod_type == "csharp" and not is_csharp:
-                    item_filtered = True
-                elif fs.mod_type == "xml" and is_csharp:
+                if fs.mod_type == "csharp" and not is_csharp or fs.mod_type == "xml" and is_csharp:
                     item_filtered = True
 
             # User tag filtering (from FilterState)

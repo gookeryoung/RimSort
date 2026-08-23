@@ -33,7 +33,6 @@ import traceback
 from logging import WARNING, getLogger
 from multiprocessing import freeze_support, set_start_method
 from types import TracebackType
-from typing import Type
 
 from loguru import logger
 
@@ -60,7 +59,7 @@ elif SYSTEM == "Windows":
 
 
 def handle_exception(
-    exc_type: Type[BaseException],
+    exc_type: type[BaseException],
     exc_value: BaseException,
     exc_traceback: TracebackType | None,
 ) -> None:

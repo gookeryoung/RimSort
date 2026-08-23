@@ -134,9 +134,7 @@ class TestOnUninstallDelete:
         )
 
         mock_entry = MagicMock()
-        mock_session.query.return_value.filter_by.return_value.first.return_value = (
-            mock_entry
-        )
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_entry
 
         panel._on_uninstall_delete()
 
@@ -208,9 +206,7 @@ class TestOnUninstallConvertToGit:
 
         mock_entry = MagicMock()
         mock_entry.installed_asset_name = None  # HEAD-tracked
-        mock_session.query.return_value.filter_by.return_value.first.return_value = (
-            mock_entry
-        )
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_entry
 
         panel._on_uninstall_convert_to_git()
 
@@ -252,9 +248,7 @@ class TestOnUninstallConvertToGit:
 
         mock_entry = MagicMock()
         mock_entry.installed_asset_name = "release.zip"  # Release-based
-        mock_session.query.return_value.filter_by.return_value.first.return_value = (
-            mock_entry
-        )
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_entry
 
         backup_path = Path("/mods/alpha.rimsort_backup")
         mock_installer.backup_mod.return_value = backup_path
@@ -263,9 +257,7 @@ class TestOnUninstallConvertToGit:
         panel._on_uninstall_convert_to_git()
 
         mock_installer.backup_mod.assert_called_once_with(Path("/mods/alpha"))
-        mock_installer.install_head.assert_called_once_with(
-            "https://github.com/owner/alpha.git", "/mods/alpha"
-        )
+        mock_installer.install_head.assert_called_once_with("https://github.com/owner/alpha.git", "/mods/alpha")
         mock_installer.delete_backup.assert_called_once_with(backup_path)
         mock_session.delete.assert_called_with(mock_entry)
         mock_session.commit.assert_called()
@@ -304,9 +296,7 @@ class TestOnUninstallConvertToGit:
 
         mock_entry = MagicMock()
         mock_entry.installed_asset_name = "release.zip"
-        mock_session.query.return_value.filter_by.return_value.first.return_value = (
-            mock_entry
-        )
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_entry
 
         backup_path = Path("/mods/alpha.rimsort_backup")
         mock_installer.backup_mod.return_value = backup_path
@@ -314,9 +304,7 @@ class TestOnUninstallConvertToGit:
 
         panel._on_uninstall_convert_to_git()
 
-        mock_installer.restore_backup.assert_called_once_with(
-            backup_path, Path("/mods/alpha")
-        )
+        mock_installer.restore_backup.assert_called_once_with(backup_path, Path("/mods/alpha"))
         mock_session.delete.assert_not_called()
 
     @patch("app.windows.github_mods_panel.QMessageBox")

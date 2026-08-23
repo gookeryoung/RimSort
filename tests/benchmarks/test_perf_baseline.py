@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import types
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -182,7 +181,6 @@ def test_sort_paths_baseline(
     ``path_to_folder_size`` 的目录扫描与 mtime 获取,预期较慢。
     """
     # patch MetadataController.instance() 以返回 mock
-    from app.controllers import metadata_controller as mc_module
     from app.sort import mod_sorting as ms_module
 
     original_instance = MetadataController.instance
@@ -328,7 +326,6 @@ def test_find_about_xml_direct_path_baseline(
     与 ``test_find_about_xml_current_baseline`` 对比,验证
     "先试 path/About/About.xml"策略的收益。本基准使用预期优化后的写法。
     """
-    from pathlib import PurePath
 
     def direct_path_lookup(mod_path: Path) -> Path | None:
         candidate = mod_path / "About" / "About.xml"

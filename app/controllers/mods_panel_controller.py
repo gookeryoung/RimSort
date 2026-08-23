@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import partial
 
 from loguru import logger
@@ -363,7 +363,7 @@ class ModsPanelController(QObject):
             self.settings.aux_db_path
         )
         with aux_metadata_controller.Session() as aux_metadata_session:
-            limit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            limit = datetime.now(UTC).replace(tzinfo=None) - timedelta(
                 seconds=time_limit
             )
             stmt = (

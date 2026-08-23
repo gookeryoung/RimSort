@@ -126,3 +126,5 @@ useLibraryCodeForTypes = true
 stubPath = ""
 exclude = ['venv', '.venv', 'submodules', '**/node_modules', '**/__pycache__', '**/.*']
 
+[tool.fspack]
+exclude = ['packaging', 'submodules', ".*"]

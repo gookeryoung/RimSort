@@ -27,9 +27,7 @@ _ALIAS_PATTERN = re.compile(r"^\s*tr\s*=\s*QCoreApplication\.translate\s*$")
 def test_no_module_level_tr_alias_of_qcoreapplication_translate() -> None:
     offending: list[str] = []
     for path in APP_DIR.rglob("*.py"):
-        for lineno, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if _ALIAS_PATTERN.match(line):
                 offending.append(f"{path.relative_to(APP_DIR.parent)}:{lineno}")
 
