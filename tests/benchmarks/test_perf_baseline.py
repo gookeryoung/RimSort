@@ -334,3 +334,114 @@ def test_find_about_xml_direct_path_baseline(
     result = benchmark(direct_path_lookup, mod_dir_with_standard_about)
     assert result is not None
     assert result.name == "About.xml"
+
+
+# ---------------------------------------------------------------------------
+# 基准 6: CustomListWidgetItemMetadata 逐项重复查询 vs 批量预取
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def aux_db_with_entries(tmp_path: Path):
+    """构造预填充 300 条 entry(含部分 tags/颜色/备注)的 aux DB。
+
+    模拟典型用户场景:300 个 mod,部分有 tag、颜色、用户备注等状态。
+    """
+    from app.controllers.metadata_db_controller import AuxMetadataController
+    from app.models.metadata.metadata_db import AuxMetadataEntry, TagsEntry
+
+    controller = AuxMetadataController(tmp_path / "aux.db")
+    n_items = 300
+    paths = [str(tmp_path / f"mod_{i}") for i in range(n_items)]
+    with controller.Session() as session:
+        tag_a = TagsEntry(tag="a")
+        tag_b = TagsEntry(tag="b")
+        session.add_all([tag_a, tag_b])
+        entries = []
+        for i, p in enumerate(paths):
+            entry = AuxMetadataEntry(
+                path=p,
+                user_notes=f"note{i}" if i % 5 == 0 else "",
+                color_hex="#ff0000" if i % 7 == 0 else None,
+                ignore_warnings=i % 11 == 0,
+            )
+            if i % 3 == 0:
+                entry.tags.append(tag_a)
+            if i % 4 == 0:
+                entry.tags.append(tag_b)
+            entries.append(entry)
+        session.add_all(entries)
+        session.commit()
+    return controller, paths
+
+
+def test_item_metadata_per_item_queries_baseline(
+    benchmark,
+    aux_db_with_entries,
+) -> None:
+    """逐项多次查询模式的基线(当前 CustomListWidgetItemMetadata 行为)。
+
+    每个 item 构造时对同一行 AuxMetadataEntry 执行 5 次独立 SELECT
+    (warning_toggled/color/tags/user_notes/updated_timestamp 各一次),
+    其中 tags 访问还触发一次 lazy-load 查询。N 个 mod 共 ~2N 次查询。
+    本基准记录 300 项下的耗时,为批量预取优化提供对比数据。
+    """
+    controller, paths = aux_db_with_entries
+
+    def per_item_queries() -> None:
+        with controller.Session() as session:
+            for path in paths:
+                # warning_toggled
+                entry = controller.get(session, path)
+                _ = entry.ignore_warnings if entry else False
+                # mod_color
+                entry = controller.get(session, path)
+                _ = entry.color_hex if entry else None
+                # mod_tags(含 lazy load)
+                entry = controller.get(session, path)
+                _ = sorted(t.tag for t in entry.tags) if entry else []
+                # updated_timestamp
+                entry = controller.get(session, path)
+                _ = entry
+                # user_notes
+                entry = controller.get(session, path)
+                _ = entry.user_notes if entry else ""
+
+    result = benchmark(per_item_queries)
+    assert result is None
+
+
+def test_item_metadata_batch_prefetch_baseline(
+    benchmark,
+    aux_db_with_entries,
+) -> None:
+    """批量预取模式的基线(优化目标对照)。
+
+    与 ``test_item_metadata_per_item_queries_baseline`` 对比:一次 IN 查询
+    (带 tags 预加载)取回全部 entry,后续逐项从字典提取字段,零额外查询。
+    """
+    from sqlalchemy.orm import selectinload
+
+    from app.models.metadata.metadata_db import AuxMetadataEntry
+
+    controller, paths = aux_db_with_entries
+
+    def batch_prefetch() -> None:
+        with controller.Session() as session:
+            entries = (
+                session.query(AuxMetadataEntry)
+                .options(selectinload(AuxMetadataEntry.tags))
+                .filter(AuxMetadataEntry.path.in_(paths))
+                .all()
+            )
+            by_path = {entry.path: entry for entry in entries}
+            for path in paths:
+                entry = by_path.get(path)
+                _ = entry.ignore_warnings if entry else False
+                _ = entry.color_hex if entry else None
+                _ = sorted(t.tag for t in entry.tags) if entry else []
+                _ = entry
+                _ = entry.user_notes if entry else ""
+
+    result = benchmark(batch_prefetch)
+    assert result is None

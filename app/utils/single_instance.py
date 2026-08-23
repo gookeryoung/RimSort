@@ -21,7 +21,10 @@ class SingleInstanceLock:
 
         :return: True if the lock was acquired, False if another instance is running.
         """
-        if self._lock_file.tryLock(0):
+        # 用短超时而非零等待: Windows 上杀毒/搜索索引器可能在锁文件创建瞬间
+        # 短暂占用文件句柄, tryLock(0) 零容忍会把这种瞬时竞争误判为
+        # "已有实例运行", 3 秒缓冲可容忍瞬时占用后再判定
+        if self._lock_file.tryLock(3000):
             logger.info(f"Single-instance lock acquired: {self._lock_path}")
             return True
 

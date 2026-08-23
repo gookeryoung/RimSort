@@ -5,7 +5,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.models.metadata.metadata_db import AuxMetadataEntry, Base
 from app.models.metadata.metadata_structure import ModType
@@ -209,7 +209,9 @@ class AuxMetadataController(MetadataDbController):
 
     @staticmethod
     def get_many(
-        session: Session, item_paths: Sequence[Path | str]
+        session: Session,
+        item_paths: Sequence[Path | str],
+        eager_load_tags: bool = False,
     ) -> dict[str, AuxMetadataEntry]:
         """批量查询多个 path 对应的 aux metadata entry。
 
@@ -218,16 +220,19 @@ class AuxMetadataController(MetadataDbController):
 
         :param session: 数据库会话
         :param item_paths: 待查询的 path 列表
+        :param eager_load_tags: 为 True 时用 ``selectinload`` 预加载 tags
+            关系,避免后续访问 ``entry.tags`` 时逐行触发 lazy-load 查询
         :return: ``{path_str: entry}`` 字典,未命中的 path 不包含在结果中
         """
         if not item_paths:
             return {}
         normalized = [str(p) if isinstance(p, Path) else p for p in item_paths]
-        entries = (
-            session.query(AuxMetadataEntry)
-            .filter(AuxMetadataEntry.path.in_(normalized))
-            .all()
+        query = session.query(AuxMetadataEntry).filter(
+            AuxMetadataEntry.path.in_(normalized)
         )
+        if eager_load_tags:
+            query = query.options(selectinload(AuxMetadataEntry.tags))
+        entries = query.all()
         return {entry.path: entry for entry in entries}
 
     @staticmethod
@@ -276,7 +281,9 @@ class AuxMetadataController(MetadataDbController):
             session.commit()
         except Exception as e:
             session.rollback()
-            logger.exception(f"Failed to upsert {len(normalized)} aux metadata entries: {e}")
+            logger.exception(
+                f"Failed to upsert {len(normalized)} aux metadata entries: {e}"
+            )
             raise e
         return existing
 

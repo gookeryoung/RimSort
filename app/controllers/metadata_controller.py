@@ -12,6 +12,7 @@ from natsort import natsorted
 from PySide6.QtCore import QMutex, QObject, Signal, Slot
 
 from app.controllers.metadata_db_controller import AuxMetadataController
+from app.models.metadata.metadata_db import AuxMetadataEntry
 from app.models.metadata.metadata_mediator import MetadataMediator
 from app.models.metadata.metadata_structure import (
     SOURCE_PRIORITY_DEFAULT,
@@ -33,7 +34,6 @@ from app.utils.steam.steamcmd.wrapper import SteamcmdInterface
 from app.utils.xml import json_to_xml_write, xml_path_to_json
 
 if TYPE_CHECKING:
-    from app.models.metadata.metadata_db import AuxMetadataEntry
     from app.models.metadata.metadata_structure import (
         ExternalRulesSchema,
         SteamDbSchema,
@@ -123,14 +123,25 @@ class MetadataController(QObject):
         )
 
         with self.metadata_db_controller.Session() as session:
-            for path, mod_data in self.metadata_mediator.mods_metadata.items():
-                try:
-                    entry = self.metadata_db_controller.get_or_create(session, path)
+            # 批量预取 + 批量创建:将 N 次 get_or_create(各含一次
+            # SELECT 与可能的 INSERT flush)降为 1 次 IN 查询 +
+            # 1 次 add_all,更新全部在内存中完成后随 session 一起提交
+            try:
+                mod_paths = list(self.metadata_mediator.mods_metadata.keys())
+                existing = self.metadata_db_controller.get_many(session, mod_paths)
+                new_entries: list[AuxMetadataEntry] = []
+                for path, mod_data in self.metadata_mediator.mods_metadata.items():
+                    entry = existing.get(path)
+                    if entry is None:
+                        entry = AuxMetadataEntry(path=path)
+                        new_entries.append(entry)
                     entry.type = str(mod_data.mod_type)
                     entry.published_file_id = mod_data.published_file_id
-                except Exception:
-                    session.rollback()
-                    logger.exception(f"Failed to update aux metadata for mod at {path}")
+                if new_entries:
+                    session.add_all(new_entries)
+            except Exception:
+                session.rollback()
+                logger.exception("Failed to batch update aux metadata for mods")
 
             self.metadata_db_controller.update_from_acf(
                 session,
@@ -554,7 +565,9 @@ class MetadataController(QObject):
                 )
                 is_steam = package_id_steam_suffix in package_id_normalized
                 target_id = (
-                    package_id_normalized_stripped if is_steam else package_id_normalized
+                    package_id_normalized_stripped
+                    if is_steam
+                    else package_id_normalized
                 )
                 to_populate.append(target_id)
                 sources_order = (
@@ -568,9 +581,7 @@ class MetadataController(QObject):
                     package_id_normalized,
                     package_id_normalized_stripped,
                 ):
-                    for cand_path, _cand_mod in pid_to_paths_mods.get(
-                        lookup_key, []
-                    ):
+                    for cand_path, _cand_mod in pid_to_paths_mods.get(lookup_key, []):
                         if cand_path not in seen_candidate_paths:
                             seen_candidate_paths.add(cand_path)
                             candidate_paths.append(cand_path)

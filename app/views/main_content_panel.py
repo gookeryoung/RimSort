@@ -351,6 +351,17 @@ class MainContent(QObject):
         self.__repopulate_lists()
         self.mods_panel.refresh_all_tag_filter_selectors()
 
+    @property
+    def refresh_in_progress(self) -> bool:
+        """Whether the main refresh flow (_do_refresh) is currently running.
+
+        Lets other views (e.g. AcfLogReader) skip work triggered by the
+        metadata_refreshed signal that arrives mid-flow, before mod lists
+        have been rebuilt; the flow ends with refresh_finished which
+        repopulates those views once with complete data.
+        """
+        return self._refresh_in_progress
+
     def abort_loading(self) -> None:
         """Abort any in-progress loading animation by quitting its nested event loop.
 
@@ -726,14 +737,12 @@ class MainContent(QObject):
             self.missing_mods,
         ) = self.metadata_controller.get_mods_from_list(
             mod_list=str(
-                
-                    Path(
-                        self.settings.instances[
-                            self.settings.current_instance
-                        ].config_folder
-                    )
-                    / "ModsConfig.xml"
-                
+                Path(
+                    self.settings.instances[
+                        self.settings.current_instance
+                    ].config_folder
+                )
+                / "ModsConfig.xml"
             )
         )
         self.active_mods_uuids_last_save = active_mods_uuids

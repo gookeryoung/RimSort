@@ -6,6 +6,7 @@ from sqlalchemy.orm.session import Session
 
 from app.controllers.metadata_controller import MetadataController
 from app.controllers.metadata_db_controller import AuxMetadataController
+from app.models.metadata.metadata_db import AuxMetadataEntry
 from app.models.metadata.metadata_structure import AboutXmlMod, ModType
 from app.models.settings import Settings
 from app.utils.aux_db_utils import (
@@ -42,6 +43,7 @@ class CustomListWidgetItemMetadata:
         list_type: str | None = None,
         aux_metadata_controller: AuxMetadataController | None = None,
         aux_metadata_session: Session | None = None,
+        aux_entry: AuxMetadataEntry | None = None,
     ) -> None:
         """
         Must provide a path, the rest is optional.
@@ -63,6 +65,11 @@ class CustomListWidgetItemMetadata:
         :param alternative: a string representing whether the widget's item has an alternative mod
         :param aux_metadata_controller: AuxMetadataController, an instance of the controller used for fetching mod color
         :param aux_metadata_session: Session, an instance of the session used for fetching mod color
+        :param aux_entry: AuxMetadataEntry | None, 调用方批量预取的 aux DB entry;
+            提供时 warning_toggled/mod_color/mod_tags/user_notes/updated_timestamp
+            全部从该 entry 提取,跳过逐项 DB 查询(批量重建列表场景,
+            将每项 ~5 次 SELECT 降为整个列表 1 次 IN 查询)。调用方须保证
+            entry 的 tags 关系已预加载,否则访问 tags 仍会触发 lazy-load。
         """
         # Do not cache the metadata controller, aux metadata controller or settings controller
         # They will cause freezes/crashes when dragging mods from inactive->active or vice versa
@@ -74,12 +81,15 @@ class CustomListWidgetItemMetadata:
         self.warnings = warnings
         self.filtered = filtered
         self.hidden_by_filter = hidden_by_filter
-        if not warning_toggled:
+        if aux_entry is not None:
+            # 预取路径:直接读 entry 字段,跳过一次 SELECT
+            self.warning_toggled = bool(aux_entry.ignore_warnings)
+        elif warning_toggled:
+            self.warning_toggled = warning_toggled
+        else:
             self.warning_toggled = auxdb_get_mod_warning_toggled(
                 settings, path, aux_metadata_controller, aux_metadata_session
             )
-        else:
-            self.warning_toggled = warning_toggled
         self.invalid = (
             invalid if invalid is not None else self.get_invalid_by_path(path)
         )
@@ -87,9 +97,13 @@ class CustomListWidgetItemMetadata:
             mismatch if mismatch is not None else self.get_mismatch_by_path(path)
         )
         if mod_color is None:
-            self.mod_color = auxdb_get_mod_color(
-                settings, path, aux_metadata_controller, aux_metadata_session
-            )
+            if aux_entry is not None:
+                color_text = aux_entry.color_hex
+                self.mod_color = QColor(color_text) if color_text else None
+            else:
+                self.mod_color = auxdb_get_mod_color(
+                    settings, path, aux_metadata_controller, aux_metadata_session
+                )
         else:
             self.mod_color = mod_color
         self.alternative = (
@@ -97,22 +111,28 @@ class CustomListWidgetItemMetadata:
             if alternative is not None
             else self.get_alternative_by_path(path)
         )
-        self.mod_tags = (
-            auxdb_get_mod_tags(
-                settings, path, aux_metadata_controller, aux_metadata_session
-            )
-            if mod_tags is None
-            else mod_tags
-        )
+        if mod_tags is None:
+            if aux_entry is not None:
+                self.mod_tags = sorted(tag.tag for tag in aux_entry.tags)
+            else:
+                self.mod_tags = auxdb_get_mod_tags(
+                    settings, path, aux_metadata_controller, aux_metadata_session
+                )
+        else:
+            self.mod_tags = mod_tags
         # Workshop update timestamp, only resolved when the indicator is enabled
         # (avoids an extra aux DB lookup per item when the feature is off).
-        self.updated_timestamp: int | None = (
-            self.get_updated_timestamp_by_path(
-                path, settings, aux_metadata_controller, aux_metadata_session
-            )
-            if settings.mod_list_updated_indicator
-            else None
-        )
+        self.updated_timestamp: int | None = None
+        if settings.mod_list_updated_indicator:
+            if aux_entry is not None:
+                # 预取路径:类型判断走内存元数据,时间戳直接读 entry
+                self.updated_timestamp = self.get_updated_timestamp_from_entry(
+                    path, aux_entry
+                )
+            else:
+                self.updated_timestamp = self.get_updated_timestamp_by_path(
+                    path, settings, aux_metadata_controller, aux_metadata_session
+                )
         # Startup impact (per-mod load time), stamped during the bulk
         # errors/warnings recompute when the feature is enabled
         self.startup_impact_s: float | None = None
@@ -124,9 +144,12 @@ class CustomListWidgetItemMetadata:
             f"Finished initializing CustomListWidgetItemMetadata for path: {path}"
         )
         if user_notes == "":
-            self.user_notes = auxdb_get_mod_user_notes(
-                settings, path, aux_metadata_controller, aux_metadata_session
-            )
+            if aux_entry is not None:
+                self.user_notes = aux_entry.user_notes or ""
+            else:
+                self.user_notes = auxdb_get_mod_user_notes(
+                    settings, path, aux_metadata_controller, aux_metadata_session
+                )
         else:
             self.user_notes = user_notes
 
@@ -192,6 +215,34 @@ class CustomListWidgetItemMetadata:
         entry = auxdb_get_aux_db_entry(
             settings, path, aux_metadata_controller, aux_metadata_session
         )
+        return resolve_workshop_updated_timestamp(entry)
+
+    def get_updated_timestamp_from_entry(
+        self,
+        path: str,
+        entry: AuxMetadataEntry,
+    ) -> int | None:
+        """从预取的 aux DB entry 计算工坊更新时间戳。
+
+        与 ``get_updated_timestamp_by_path`` 语义一致,但 entry 由调用方
+        批量预取,避免逐项查询 aux DB。仅 Steam Workshop / SteamCMD mod
+        返回有效时间戳,其余来源返回 None。
+
+        :param path: str, the path of the mod
+        :param entry: AuxMetadataEntry, 预取的 aux DB entry
+        :return: int | None, the epoch update timestamp, or None if unavailable
+        """
+        metadata_controller = MetadataController.instance()
+        try:
+            mod = metadata_controller.get_mod(path)
+        except KeyError:
+            logger.error(f"Path {path} not found in metadata")
+            return None
+        if mod is None or mod.mod_type not in (
+            ModType.STEAM_WORKSHOP,
+            ModType.STEAM_CMD,
+        ):
+            return None
         return resolve_workshop_updated_timestamp(entry)
 
     def get_alternative_by_path(self, path: str) -> str | None:

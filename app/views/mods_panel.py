@@ -2265,18 +2265,16 @@ class ModListWidget(QListWidget):
                         if mod_name:
                             mod_name = sanitize_filename(mod_name)
                         renamed_mod_path = str(
-                            
-                                Path(
-                                    self.settings.instances[
-                                        self.settings.current_instance
-                                    ].local_folder
-                                )
-                                / (
-                                    mod_name
-                                    if mod_name
-                                    else publishedfileid_from_folder_name
-                                )
-                            
+                            Path(
+                                self.settings.instances[
+                                    self.settings.current_instance
+                                ].local_folder
+                            )
+                            / (
+                                mod_name
+                                if mod_name
+                                else publishedfileid_from_folder_name
+                            )
                         )
                         if os.path.exists(path):
                             try:
@@ -3817,7 +3815,10 @@ class ModListWidget(QListWidget):
             # Skip sorting if UUIDs are already filtered/sorted (filtering=True)
             if not filtering:
                 # Sort inactive mods using saved settings if enabled
-                if list_type == "Inactive" and self.settings.save_inactive_mods_sort_state:
+                if (
+                    list_type == "Inactive"
+                    and self.settings.save_inactive_mods_sort_state
+                ):
                     sort_key = ModsPanelSortKey[self.settings.inactive_mods_sort_key]
                     descending = self.settings.inactive_mods_sort_descending
                     uuids = sort_paths(
@@ -3876,7 +3877,14 @@ class ModListWidget(QListWidget):
                             list(uuid_to_mod_path.values()),
                             outdated=False,
                         )
-                    # 第三阶段:在共享 session 内构造所有 item
+                    # 第三阶段:单次 IN 查询批量预取 aux entry(含 tags 预加载),
+                    # 供 CustomListWidgetItemMetadata 直接读取,跳过逐项 ~5 次 SELECT
+                    prefetched_entries = aux_metadata_controller.get_many(
+                        aux_metadata_session,
+                        list(uuid_to_mod_path.values()),
+                        eager_load_tags=True,
+                    )
+                    # 第四阶段:在共享 session 内构造所有 item
                     for uuid_key, mod_path in uuid_to_mod_path.items():
                         list_item = CustomListWidgetItem(self)
                         data = CustomListWidgetItemMetadata(
@@ -3885,6 +3893,7 @@ class ModListWidget(QListWidget):
                             aux_metadata_controller=aux_metadata_controller,
                             aux_metadata_session=aux_metadata_session,
                             settings=self.settings,
+                            aux_entry=prefetched_entries.get(mod_path),
                         )
                         data.__dict__["show_tags"] = self.show_tags
                         list_item.setData(Qt.ItemDataRole.UserRole, data)
@@ -4166,7 +4175,9 @@ class ModsPanel(QWidget):
         self._sort_debounce_timer = QTimer()
         self._sort_debounce_timer.setSingleShot(True)
         self._sort_debounce_timer.timeout.connect(self._execute_pending_sort)
-        self._pending_sort_params: tuple[str, list[str], ModsPanelSortKey, bool] | None = None
+        self._pending_sort_params: (
+            tuple[str, list[str], ModsPanelSortKey, bool] | None
+        ) = None
 
         # Base layout with a splitter for resizable mod lists
         self.panel = QVBoxLayout()
@@ -4656,15 +4667,36 @@ class ModsPanel(QWidget):
 
             # OPTIMIZATION 1: Single DB session for all mods instead of per-mod
             with aux_metadata_controller.Session() as aux_metadata_session:
+                # 先单次循环构建 uuid->mod_path 映射,避免在后续预取与
+                # item 构造中重复调用 get_mod
+                uuid_to_mod_path: dict[str, str] = {}
+                for uuid_key in sorted_uuids:
+                    if is_divider_uuid(uuid_key):
+                        continue
+                    _mod = self.metadata_controller.get_mod(uuid_key)
+                    mod_path = (
+                        str(_mod.mod_path) if _mod and _mod.mod_path else uuid_key
+                    )
+                    uuid_to_mod_path[uuid_key] = mod_path
+                # 单次 IN 查询批量预取 aux entry(含 tags 预加载),
+                # 供 CustomListWidgetItemMetadata 直接读取,跳过逐项 ~5 次 SELECT
+                prefetched_entries = aux_metadata_controller.get_many(
+                    aux_metadata_session,
+                    list(uuid_to_mod_path.values()),
+                    eager_load_tags=True,
+                )
                 for idx, uuid_key in enumerate(sorted_uuids, start=1):
                     list_item = CustomListWidgetItem(lw)
-                    # Create metadata with aux controller to reduce lookups
+                    # Create metadata with prefetched entry to skip per-item queries
                     data = CustomListWidgetItemMetadata(
                         path=uuid_key,
                         list_type=lw.list_type,
                         settings=self.settings,
                         aux_metadata_controller=aux_metadata_controller,
                         aux_metadata_session=aux_metadata_session,
+                        aux_entry=prefetched_entries.get(
+                            uuid_to_mod_path.get(uuid_key, uuid_key)
+                        ),
                     )
                     data.__dict__["show_tags"] = lw.show_tags
                     list_item.setData(Qt.ItemDataRole.UserRole, data)
@@ -5236,7 +5268,12 @@ class ModsPanel(QWidget):
             # Type filtering (string-based from FilterState)
             if not item_filtered and fs.mod_type != "all":
                 is_csharp = mod_obj.c_sharp_mod
-                if fs.mod_type == "csharp" and not is_csharp or fs.mod_type == "xml" and is_csharp:
+                if (
+                    fs.mod_type == "csharp"
+                    and not is_csharp
+                    or fs.mod_type == "xml"
+                    and is_csharp
+                ):
                     item_filtered = True
 
             # User tag filtering (from FilterState)

@@ -38,6 +38,7 @@ from app.utils.csv_export_utils import export_to_csv
 from app.utils.event_bus import EventBus
 from app.utils.generic import format_time_display
 from app.utils.mod_info import ModInfo
+from app.views.main_content_panel import MainContent
 from app.windows.base_mods_panel import BaseModsPanel, ColumnIndex
 
 
@@ -352,8 +353,20 @@ class AcfLogReader(BaseModsPanel):
         4. Enables sorting (sets default sort on first load, preserves user sort on refresh)
 
         Called automatically when EventBus().refresh_finished signal is emitted
-        (triggered on app startup and after manual refresh).
+        (triggered on app startup and after manual refresh), and when the
+        metadata_refreshed signal is emitted (e.g. by do_metadata_refresh_cache).
+
+        Skipped while the main refresh flow (_do_refresh) is in progress:
+        metadata_refreshed arrives first, during the loading animation's
+        nested event loop, before mod lists are rebuilt. The flow ends with
+        refresh_finished which populates once with complete data.
         """
+        # 主刷新流程期间跳过：metadata_refreshed 先于 mod 列表重建到达，此时填充
+        # 不完整且与流程末尾 refresh_finished 触发的填充重复，等流程结束后统一填充
+        main_content = MainContent._instance
+        if main_content is not None and main_content.refresh_in_progress:
+            logger.debug("ACF Log Reader: skipping population during main refresh flow")
+            return
         logger.warning("Populating ACF Log Reader")
         overall_start = time.time()
         # Update active PFIDs from active mods list
