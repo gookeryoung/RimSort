@@ -106,18 +106,23 @@ if "--disable-updater" in sys.argv:
     # Note: logger not yet configured, so can't log here
 
 
-def main_thread() -> None:
-    app_controller = None
+def main_thread() -> int:
+    """Run the application lifecycle and return an exit code.
+
+    返回退出码而非在函数内直接 ``sys.exit()``：正常退出（码 0）时模块可以
+    自然执行完毕，外层启动剖析工具（如 fspack 打点）的入口结束标记才能
+    执行，避免整个入口阶段耗时无法归因；仅非零退出码才由调用方显式退出。
+    """
+    app_controller: AppController | None = None
+    exit_code = 1
     try:
         app_controller = AppController()
-        sys.exit(app_controller.run())
+        exit_code = app_controller.run()
     except Exception as e:
         # Catch exceptions during initial application instantiation
         # Uncaught exceptions during the application loop are caught with excepthook
         stacktrace: str = ""
-        if isinstance(e, SystemExit):
-            logger.warning("Exiting application")
-        elif (
+        if (
             e.__class__.__name__ == "HTTPError" or e.__class__.__name__ == "SSLError"
         ):  # requests.exceptions.HTTPError OR urllib3.exceptions.SSLError
             stacktrace = traceback.format_exc()
@@ -136,7 +141,7 @@ def main_thread() -> None:
         logger.error(stacktrace)
         show_fatal_error(details=stacktrace)
     finally:
-        if app_controller is not None and "app_controller" in locals():
+        if app_controller is not None:
             try:
                 logger.debug("Stopping watchdog...")
                 app_controller.shutdown_watchdog()
@@ -147,7 +152,7 @@ def main_thread() -> None:
                     f"watchdog received the following exception while exiting: {stacktrace}"
                 )
         logger.info("Exiting application!")
-        sys.exit()
+    return exit_code
 
 
 if __name__ == "__main__":
@@ -260,7 +265,11 @@ if __name__ == "__main__":
         lock = None
 
     try:
-        main_thread()
+        _exit_code = main_thread()
     finally:
         if lock is not None:
             lock.release()
+    # 正常退出(码 0)时模块自然结束,不抛 SystemExit,让外层启动剖析工具的
+    # 入口结束打点得以执行;仅非零退出码才显式退出进程
+    if _exit_code != 0:
+        sys.exit(_exit_code)

@@ -1,6 +1,5 @@
 from collections.abc import Mapping
 
-import networkx as nx
 from loguru import logger
 from PySide6.QtCore import QCoreApplication
 from toposort import CircularDependencyError, toposort
@@ -69,6 +68,10 @@ def do_topo_sort(
 
 
 def find_circular_dependencies(dependency_graph: dict[str, set[str]]) -> None:
+    # networkx 导入耗时约 190ms,且仅在检测到循环依赖的异常路径才需要,
+    # 延迟到此处导入,避免拖慢模块导入链(排序主路径不触发)
+    import networkx as nx
+
     graph = nx.DiGraph(dependency_graph)  # type: ignore
     cycles = list(nx.simple_cycles(graph))
 

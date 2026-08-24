@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 import msgspec
 from loguru import logger
-from natsort import natsorted
 from PySide6.QtCore import QMutex, QObject, Signal, Slot
 
 from app.controllers.metadata_db_controller import AuxMetadataController
@@ -525,6 +524,9 @@ class MetadataController(QObject):
         to_populate: list[str] = []
 
         logger.debug("Started generating active and inactive mods")
+
+        # natsort 导入耗时约 76ms,仅重复 mod 排序分支需要,延迟到使用点导入
+        from natsort import natsorted
 
         # 一次遍历构建两个索引:
         #   duplicate_mods: package_id -> list[path](仅保留长度>1)

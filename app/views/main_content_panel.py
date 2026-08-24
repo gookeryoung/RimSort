@@ -9,7 +9,7 @@ import webbrowser
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, Optional, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast, overload
 
 from loguru import logger
 from PySide6.QtCore import (
@@ -62,7 +62,6 @@ from app.utils.json_utils import atomic_json_dump
 from app.utils.rentry.wrapper import RentryImport
 from app.utils.startup_impact import invalidate_startup_impact_cache
 from app.utils.steam.availability import check_steam_available
-from app.utils.steam.steambrowser.browser import SteamBrowser
 from app.utils.steam.steamcmd.wrapper import SteamcmdInterface
 from app.utils.steam.steamworks.wrapper import (
     SteamworksGameLaunch,
@@ -99,6 +98,10 @@ from app.windows.rule_editor_panel import RuleEditor
 from app.windows.runner_panel import RunnerPanel
 from app.windows.use_this_instead_panel import UseThisInsteadPanel
 from app.windows.workshop_mod_updater_panel import WorkshopModUpdaterPanel
+
+if TYPE_CHECKING:
+    # 仅类型注解需要;运行时在 _do_browse_workshop 内延迟导入(QtWebEngine 链较重)
+    from app.utils.steam.steambrowser.browser import SteamBrowser
 
 
 class MainContent(QObject):
@@ -1936,6 +1939,10 @@ class MainContent(QObject):
             return
 
     def _do_browse_workshop(self) -> None:
+        # QtWebEngineCore 导入链耗时较长,且仅在用户打开创意工坊浏览器时需要,
+        # 延迟到使用点导入,避免拖慢应用启动
+        from app.utils.steam.steambrowser.browser import SteamBrowser
+
         # Clean up previous instance if it still exists
         if self.steam_browser:
             self.steam_browser.close()

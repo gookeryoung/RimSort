@@ -7,7 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from github import Github, Repository
 from loguru import logger
 from PySide6.QtCore import QObject, QThreadPool, Slot
 from PySide6.QtWidgets import QInputDialog, QMessageBox
@@ -65,6 +64,7 @@ from app.views.dialogue import (
 from app.views.main_content_panel import MainContent
 
 if TYPE_CHECKING:
+    from github import Repository
     from sqlalchemy.orm import Session
 
     from app.utils.github.updater import UpdateAvailable
@@ -1494,14 +1494,15 @@ class MainContentController(QObject):
             return
 
         # Create human-readable version
-        timezone_abbreviation = (
-            datetime.datetime.now(datetime.UTC).astimezone().tzinfo
-        )
+        timezone_abbreviation = datetime.datetime.now(datetime.UTC).astimezone().tzinfo
         database_version_human_readable = (
             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(database_version))
             + f" {timezone_abbreviation}"
         )
         # Initialize GitHub API
+        # PyGithub 整包导入耗时约 100ms,仅用户主动上传数据库时需要,延迟到使用点导入
+        from github import Github
+
         try:
             g = Github(github_username, github_token)
             original_repo = g.get_repo(f"{repo_user_or_org}/{repo_folder_name}")

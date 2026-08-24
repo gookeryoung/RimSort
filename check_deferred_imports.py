@@ -24,6 +24,12 @@ ALLOWED: set[str] = {
     "app/utils/github/installer.py: from app.utils.git_utils import GitOperationConfig",
     # Window import is heavy; TYPE_CHECKING also covers the type
     "app/controllers/main_content_controller.py: from app.windows.github_mods_panel import GitHubModsPanel",
+    # Startup-performance: QtWebEngine import chain is heavy, only needed on user action
+    "app/views/main_content_panel.py: from app.utils.steam.steambrowser.browser import SteamBrowser",
+    # Startup-performance: heavy dialog / network / binary-loader modules
+    "app/controllers/main_content_controller.py: from app.views.download_rimworld_dialog import DownloadRimWorldDialog",
+    "app/utils/generic.py: from app.utils.privatebin import upload_to_privatebin",
+    "app/utils/github/installer.py: from app.utils.pygit2_loader import pygit2",
     # Genuine circular: settings_dialog ↔ language_controller
     "app/views/settings_dialog.py: from app.controllers.language_controller import LanguageController",
     # Platform-guarded: find_steam_folder only defined on win32
