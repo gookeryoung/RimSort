@@ -112,25 +112,20 @@ class UpdateError(Exception):
     """Base exception for update-related errors."""
 
 
-
 class UpdateNetworkError(UpdateError):
     """Raised when network-related errors occur."""
-
 
 
 class UpdateDownloadError(UpdateError):
     """Raised when download fails."""
 
 
-
 class UpdateExtractionError(UpdateError):
     """Raised when extraction fails."""
 
 
-
 class UpdateScriptLaunchError(UpdateError):
     """Raised when launching update script fails."""
-
 
 
 class ReleaseInfo(TypedDict):
@@ -414,6 +409,36 @@ class TarExtractThread(QThread):
         self._should_abort = True
 
 
+class _ReleaseFetchWorker(QThread):
+    """后台获取 RimSort 最新 release 信息(连通性探测 + GitHub API 请求)。
+
+    网络请求在主线程同步执行时,国内网络下对 steamcommunity/github 的
+    连接超时叠加重试会冻结界面数十秒至数分钟,故整体移入后台线程;
+    结果经信号回主线程(队列连接)处理:成功发 fetched(dict),探测失败
+    发 offline,API 请求失败发 fetch_failed(错误信息)。
+    """
+
+    fetched = Signal(object)  # dict[str, Any]
+    offline = Signal()
+    fetch_failed = Signal(str)  # error message
+
+    def run(self) -> None:
+        # 后台线程禁用错误弹窗(Qt 控件禁止跨线程操作),提示交由主线程回调
+        if not check_internet_connection(show_error_dialog=False):
+            self.offline.emit()
+            return
+        try:
+            response = http.get(GITHUB_API_URL, timeout=API_TIMEOUT)
+            response.raise_for_status()
+            self.fetched.emit(response.json())
+        except requests.RequestException as e:
+            logger.warning(f"Failed to fetch release information: {e}")
+            self.fetch_failed.emit(str(e))
+        except Exception as e:  # JSON 解析等其他异常
+            logger.warning(f"Unexpected error fetching release info: {e}")
+            self.fetch_failed.emit(str(e))
+
+
 class UpdateManager(QObject):
     update_progress = Signal(int, str)  # percent, message
     download_complete = Signal(bool, str)  # success, error_message
@@ -495,6 +520,9 @@ class UpdateManager(QObject):
         )
         # Progress window for update operations
         self._progress_widget: TaskProgressWindow | None = None
+        # Background release fetch worker (kept to prevent GC while running)
+        self._release_fetch_worker: _ReleaseFetchWorker | None = None
+        self._check_start_time = datetime.now()
 
     def _check_needs_elevation(self) -> bool:
         """
@@ -608,31 +636,31 @@ class UpdateManager(QObject):
         """
         Check for RimSort updates and handle the update process.
 
-        This method orchestrates the update process by delegating to focused sub-methods
-        for better maintainability and testability.
+        本地前置校验在主线程同步完成(涉及弹窗);网络段(连通性探测 +
+        GitHub API 请求)移入后台线程执行,完成后经信号回主线程继续
+        版本比较与更新流程——网络请求在主线程同步执行时,国内网络下
+        对 steamcommunity/github 的连接超时会冻结界面数十秒至数分钟。
         """
-        start_time = datetime.now()
+        self._check_start_time = datetime.now()
         logger.info("Starting update check process...")
 
         try:
-            # Validate prerequisites
-            if not self._validate_prerequisites():
+            # Validate local prerequisites (dialogs must stay on main thread)
+            if not self._validate_local_prerequisites():
                 return
 
-            # Fetch and compare versions
-            update_info = self._fetch_and_compare_versions()
-            if not update_info:
-                logger.info("No update available or update declined by user")
-                return
-
-            # Handle the update process
-            self._handle_update_process(update_info)
-
-            total_time = (datetime.now() - start_time).total_seconds()
-            logger.info(f"Update check process completed in {total_time:.2f}s")
+            # Network stage runs in background; results handled via signals
+            # on the main thread.
+            self._release_fetch_worker = _ReleaseFetchWorker()
+            self._release_fetch_worker.fetched.connect(self._on_release_data_fetched)
+            self._release_fetch_worker.offline.connect(self._on_release_fetch_offline)
+            self._release_fetch_worker.fetch_failed.connect(
+                self._on_release_fetch_failed
+            )
+            self._release_fetch_worker.start()
 
         except Exception as e:
-            total_time = (datetime.now() - start_time).total_seconds()
+            total_time = (datetime.now() - self._check_start_time).total_seconds()
             logger.exception(f"Update check failed after {total_time:.2f}s")
             dialogue.show_warning(
                 title=self.tr(ERR_UPDATE_FAILED_TITLE),
@@ -641,12 +669,55 @@ class UpdateManager(QObject):
                 details=traceback.format_exc(),
             )
 
-    def _validate_prerequisites(self) -> bool:
+    def _on_release_fetch_offline(self) -> None:
+        """Handle offline result from background probe (preserves original dialog)."""
+        total_time = (datetime.now() - self._check_start_time).total_seconds()
+        logger.info(f"Update check skipped (offline) after {total_time:.2f}s")
+        # 原实现在探测失败时由 check_internet_connection 弹窗,此处回主线程补齐
+        dialogue.show_internet_connection_error(
+            failed_urls=["https://steamcommunity.com", "https://github.com"]
+        )
+
+    def _on_release_fetch_failed(self, error: str) -> None:
+        """Handle GitHub API fetch failure from background worker (preserves original dialog)."""
+        total_time = (datetime.now() - self._check_start_time).total_seconds()
+        logger.warning(f"Release fetch failed after {total_time:.2f}s: {error}")
+        dialogue.show_warning(
+            title=self.tr(ERR_API_CONNECTION_TITLE),
+            text=self.tr(ERR_API_CONNECTION_TEXT).format(error=error),
+        )
+
+    def _on_release_data_fetched(self, release_data: dict[str, Any]) -> None:
+        """Handle background fetch result: compare versions and prompt on main thread."""
+        try:
+            # Compare versions and prompt user
+            update_info = self._compare_versions_and_prompt(release_data)
+            if not update_info:
+                logger.info("No update available or update declined by user")
+                return
+
+            # Handle the update process
+            self._handle_update_process(update_info)
+
+            total_time = (datetime.now() - self._check_start_time).total_seconds()
+            logger.info(f"Update check process completed in {total_time:.2f}s")
+
+        except Exception as e:
+            total_time = (datetime.now() - self._check_start_time).total_seconds()
+            logger.exception(f"Update check failed after {total_time:.2f}s")
+            dialogue.show_warning(
+                title=self.tr(ERR_UPDATE_FAILED_TITLE),
+                text=self.tr(ERR_UPDATE_FAILED_TEXT),
+                information=f"Unexpected error during update check: {e!s}",
+                details=traceback.format_exc(),
+            )
+
+    def _validate_local_prerequisites(self) -> bool:
         """
-        Validate all prerequisites for the update process.
+        Validate local prerequisites for the update process (main thread).
 
         Returns:
-            bool: True if all prerequisites are met, False otherwise
+            bool: True if prerequisites are met, False otherwise
         """
         # Check for disable flag
         if os.getenv("RIMSORT_DISABLE_UPDATER"):
@@ -667,15 +738,16 @@ class UpdateManager(QObject):
             )
             return False
 
-        # Check internet connection
-        if not check_internet_connection():
-            return False
-
         return True
 
-    def _fetch_and_compare_versions(self) -> dict[str, Any] | None:
+    def _compare_versions_and_prompt(
+        self, release_data: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """
-        Fetch latest release information and compare versions.
+        Parse fetched release data, compare versions and prompt the user (main thread).
+
+        Args:
+            release_data: Raw JSON dict from the GitHub releases API
 
         Returns:
             Dict containing update information if update is available and accepted,
@@ -689,9 +761,10 @@ class UpdateManager(QObject):
         current_version = AppInfo().app_version
         logger.info(f"Current RimSort version: {current_version}")
 
-        # Get the latest release info
-        logger.info("Fetching latest release information from GitHub API...")
-        latest_release_info = self._get_latest_release_info(needs_elevation)
+        # Parse the fetched release info (asset selection may show dialogs)
+        latest_release_info = self._get_latest_release_info(
+            release_data, needs_elevation
+        )
         if not latest_release_info:
             logger.warning("Failed to retrieve latest release information")
             return None
@@ -805,69 +878,52 @@ class UpdateManager(QObject):
             raise UpdateError(f"Update failed: {e}") from e
 
     def _get_latest_release_info(
-        self, needs_elevation: bool = False
+        self, release_data: dict[str, Any], needs_elevation: bool = False
     ) -> ReleaseInfo | None:
         """
-        Get the latest release information from GitHub API.
+        Parse fetched release data into update information (main thread).
 
         Args:
+            release_data: Raw JSON dict fetched from the GitHub releases API
             needs_elevation: Whether elevation is needed (affects Windows asset selection)
 
         Returns:
             Dictionary containing version, tag_name, download_url, and is_msi flag, or None if failed
         """
+        tag_name = release_data.get("tag_name", "")
+        # Normalize tag name by removing prefix 'v' if present
+        normalized_tag = TAG_PREFIX_PATTERN.sub("", str(tag_name))
+
+        # Parse version
         try:
-            # Use releases API for better asset information
-            response = http.get(GITHUB_API_URL, timeout=API_TIMEOUT)
-            response.raise_for_status()
-            release_data = response.json()
-
-            tag_name = release_data.get("tag_name", "")
-            # Normalize tag name by removing prefix 'v' if present
-            normalized_tag = TAG_PREFIX_PATTERN.sub("", str(tag_name))
-
-            # Parse version
-            try:
-                latest_version = version.parse(normalized_tag)
-            except Exception as e:
-                logger.warning(f"Failed to parse version from tag {tag_name}: {e}")
-                self.show_update_error()
-                return None
-
-            # Get platform-specific download URL
-            download_info = self._get_platform_download_url(
-                release_data.get("assets", []), needs_elevation
-            )
-            if not download_info:
-                system_info = f"{platform.system()} {platform.architecture()[0]} {platform.machine()}"
-                dialogue.show_warning(
-                    title=self.tr(ERR_NO_VALID_RELEASE_TITLE),
-                    text=self.tr(ERR_NO_VALID_RELEASE_TEXT).format(
-                        system_info=system_info
-                    ),
-                )
-                return None
-
-            return {
-                "version": latest_version,
-                "tag_name": tag_name,
-                "download_url": download_info["url"],
-                "is_msi": download_info.get("is_msi", False),
-                "is_appimage": download_info.get("is_appimage", False),
-                "is_tar_gz": download_info.get("is_tar_gz", False),
-            }
-
-        except requests.RequestException as e:
-            logger.warning(f"Failed to fetch release information: {e}")
-            dialogue.show_warning(
-                title=self.tr(ERR_API_CONNECTION_TITLE),
-                text=self.tr(ERR_API_CONNECTION_TEXT).format(error=str(e)),
-            )
-            return None
+            latest_version = version.parse(normalized_tag)
         except Exception as e:
-            logger.warning(f"Unexpected error fetching release info: {e}")
+            logger.warning(f"Failed to parse version from tag {tag_name}: {e}")
             self.show_update_error()
             return None
+
+        # Get platform-specific download URL
+        download_info = self._get_platform_download_url(
+            release_data.get("assets", []), needs_elevation
+        )
+        if not download_info:
+            system_info = (
+                f"{platform.system()} {platform.architecture()[0]} {platform.machine()}"
+            )
+            dialogue.show_warning(
+                title=self.tr(ERR_NO_VALID_RELEASE_TITLE),
+                text=self.tr(ERR_NO_VALID_RELEASE_TEXT).format(system_info=system_info),
+            )
+            return None
+
+        return {
+            "version": latest_version,
+            "tag_name": tag_name,
+            "download_url": download_info["url"],
+            "is_msi": download_info.get("is_msi", False),
+            "is_appimage": download_info.get("is_appimage", False),
+            "is_tar_gz": download_info.get("is_tar_gz", False),
+        }
 
     def _asset_matches(
         self,
@@ -2055,9 +2111,7 @@ class UpdateManager(QObject):
             logger.error(
                 f"Children: {[c.name for c in extract_path.iterdir()] if extract_path.exists() else 'N/A'}"
             )
-            raise UpdateExtractionError(
-                f"Structure normalization failed: {e!s}"
-            ) from e
+            raise UpdateExtractionError(f"Structure normalization failed: {e!s}") from e
 
     def _launch_update_script(
         self,
@@ -2509,9 +2563,7 @@ class UpdateManager(QObject):
         else:
             progress_widget.show()
 
-    def _hide_progress_widget(
-        self, progress_widget: TaskProgressWindow | None
-    ) -> None:
+    def _hide_progress_widget(self, progress_widget: TaskProgressWindow | None) -> None:
         """Close and remove progress widget from panel."""
         try:
             if progress_widget:

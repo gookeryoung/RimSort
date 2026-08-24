@@ -5,6 +5,7 @@ import subprocess
 import sys
 import webbrowser
 from collections.abc import Callable, Generator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from errno import EACCES
 from io import TextIOWrapper
@@ -20,7 +21,6 @@ from loguru import logger
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
-from app.utils import http
 from app.utils.launch_command_parser import parse_launch_command
 from app.utils.platform.windows import scanpath_win32
 from app.views import dialogue
@@ -711,33 +711,51 @@ def find_steam_rimworld(steam_folder: Path | str) -> str:
     return str(full_rimworld_path) if rimworld_path else rimworld_path
 
 
-def check_internet_connection(timeout: float = 10) -> bool:
+def check_internet_connection(
+    timeout: float = 2, show_error_dialog: bool = True
+) -> bool:
     """
-    Check if there is an active internet connection by verifying access to Steam and GitHub.
+    快速探测网络连通性(Steam/GitHub 任一可达即视为在线)。
 
-    :param timeout: Timeout in seconds for each connection attempt
-    :return: True if at least one service is accessible, False otherwise
+    该函数常在启动路径的主线程调用,必须快去快回:
+    - 使用裸 requests 直连而非 app.utils.http 的重试会话——连接探测经
+      Retry(total=4, backoff) 放大后,10s 超时可累积为单目标 60s+,
+      国内网络下会冻结主线程导致界面"未响应";
+    - 两个目标并行探测,总耗时约等于最慢单目标;
+    - 默认连接超时 2s/读超时 3s,最坏约 3 秒出结果。
+
+    :param timeout: 连接超时秒数(读超时固定为 timeout + 1)
+    :param show_error_dialog: 全部失败时是否弹窗提示(后台线程调用须传 False,
+        Qt 控件禁止在非主线程操作)
+    :return: 至少一个服务可达返回 True,否则 False
     """
     urls = [
         "https://steamcommunity.com",
         "https://github.com",
     ]
 
-    failed_urls = []
-
-    for url in urls:
+    def _probe(url: str) -> bool:
         try:
-            http.head(url, timeout=timeout)
+            requests.head(url, timeout=(timeout, timeout + 1), allow_redirects=True)
             logger.debug(f"Internet connection verified via {url}")
             return True
         except requests.exceptions.RequestException as e:
             logger.debug(f"Connection to {url} failed: {e}")
-            failed_urls.append(url)
+            return False
 
+    with ThreadPoolExecutor(max_workers=len(urls)) as executor:
+        results = list(executor.map(_probe, urls))
+
+    # 任一目标可达即视为在线(与原实现的短路返回语义一致)
+    if any(results):
+        return True
+
+    failed_urls = [url for url, ok in zip(urls, results, strict=True) if not ok]
     logger.error(
         f"No internet connection detected. Failed to reach: {', '.join(failed_urls)}"
     )
-    dialogue.show_internet_connection_error(failed_urls=failed_urls)
+    if show_error_dialog:
+        dialogue.show_internet_connection_error(failed_urls=failed_urls)
     return False
 
 

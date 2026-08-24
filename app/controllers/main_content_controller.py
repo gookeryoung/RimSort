@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
-from PySide6.QtCore import QObject, QThreadPool, Slot
+from PySide6.QtCore import QObject, QThread, QThreadPool, Signal, Slot
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from app.controllers.metadata_controller import MetadataController
@@ -60,6 +60,7 @@ from app.views.dialogue import (
     BinaryChoiceDialog,
     InformationBox,
     show_dialogue_conditional,
+    show_internet_connection_error,
 )
 from app.views.main_content_panel import MainContent
 
@@ -69,6 +70,25 @@ if TYPE_CHECKING:
 
     from app.utils.github.updater import UpdateAvailable
     from app.windows.github_mods_panel import GitHubModsPanel
+
+
+class _StartupConnectivityWorker(QThread):
+    """后台探测网络连通性,供启动路径使用。
+
+    启动路径在主线程同步执行(事件循环尚未运转),探测对
+    steamcommunity/github 的连接超时会直接冻结窗口;移入后台线程,
+    结果经信号回主线程。
+    """
+
+    online = Signal()
+    offline = Signal()
+
+    def run(self) -> None:
+        # 后台线程禁用错误弹窗(Qt 控件禁止跨线程操作),提示交由主线程回调
+        if check_internet_connection(show_error_dialog=False):
+            self.online.emit()
+        else:
+            self.offline.emit()
 
 
 class MainContentController(QObject):
@@ -92,6 +112,8 @@ class MainContentController(QObject):
         self._github_version_switch_worker: GitHubVersionSwitchWorker | None = None
         self._github_update_check_worker: GitHubUpdateCheckWorker | None = None
         self._github_mods_panel: GitHubModsPanel | None = None
+        # 启动期连通性探测 worker(运行期间持有引用防 GC)
+        self._startup_connectivity_worker: _StartupConnectivityWorker | None = None
 
         # Thread pool for concurrent tasks
         self.thread_pool = QThreadPool.globalInstance()
@@ -738,14 +760,33 @@ class MainContentController(QObject):
         """
         Silently update databases on startup if enabled.
         Dispatches to HTTP or git depending on each database's configured source.
+
+        连通性探测在后台线程执行:启动路径在主线程同步运行(事件循环尚未
+        起转),探测在国内网络下对 steamcommunity/github 的连接超时会直接
+        冻结窗口数十秒;探测完成后回主线程分发下载任务。
         """
         if not self.settings.update_databases_on_startup:
             logger.info("Update databases on startup is disabled.")
             return
 
-        if not check_internet_connection():
-            return
+        self._startup_connectivity_worker = _StartupConnectivityWorker()
+        self._startup_connectivity_worker.online.connect(
+            self._update_databases_on_startup_dispatch
+        )
+        self._startup_connectivity_worker.offline.connect(
+            self._on_startup_connectivity_offline
+        )
+        self._startup_connectivity_worker.start()
 
+    def _on_startup_connectivity_offline(self) -> None:
+        """启动期探测离线:回主线程补弹提示(与原同步实现行为一致)。"""
+        logger.info("Startup database update skipped (offline)")
+        show_internet_connection_error(
+            failed_urls=["https://steamcommunity.com", "https://github.com"]
+        )
+
+    def _update_databases_on_startup_dispatch(self) -> None:
+        """在线状态下分发各数据库的启动更新任务(HTTP 或 git)。"""
         settings = self.settings
         http_tasks: list[DatabaseDownloadTask] = []
 
