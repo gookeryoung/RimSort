@@ -124,7 +124,7 @@ def test_setup_logging_creates_log_file(tmp_path: Path) -> None:
     logger.complete()
     log_file = tmp_path / "RimSort.log"
     assert log_file.exists()
-    content = log_file.read_text()
+    content = log_file.read_text(encoding="utf-8")
     assert "test message" in content
     logger.remove()
 
@@ -134,7 +134,7 @@ def test_setup_logging_debug_level(tmp_path: Path) -> None:
     setup_logging(log_dir=tmp_path, debug=True)
     logger.debug("debug msg")
     logger.complete()
-    content = (tmp_path / "RimSort.log").read_text()
+    content = (tmp_path / "RimSort.log").read_text(encoding="utf-8")
     assert "debug msg" in content
     logger.remove()
 
@@ -145,7 +145,7 @@ def test_setup_logging_info_level_no_debug(tmp_path: Path) -> None:
     logger.debug("should not appear")
     logger.info("should appear")
     logger.complete()
-    content = (tmp_path / "RimSort.log").read_text()
+    content = (tmp_path / "RimSort.log").read_text(encoding="utf-8")
     assert "should not appear" not in content
     assert "should appear" in content
     logger.remove()
@@ -156,7 +156,7 @@ def test_setup_logging_obfuscates_paths(tmp_path: Path) -> None:
     setup_logging(log_dir=tmp_path, debug=False)
     logger.info("File at /home/john/Documents/mod.xml")
     logger.complete()
-    content = (tmp_path / "RimSort.log").read_text()
+    content = (tmp_path / "RimSort.log").read_text(encoding="utf-8")
     assert "/home/john/" not in content
     assert "/home/.../" in content
     logger.remove()
@@ -166,7 +166,7 @@ def test_setup_logging_rotates_existing(tmp_path: Path) -> None:
     """Calling setup_logging rotates existing log files."""
     (tmp_path / "RimSort.log").write_text("old session")
     setup_logging(log_dir=tmp_path, debug=False)
-    assert (tmp_path / "RimSort.1.log").read_text() == "old session"
+    assert (tmp_path / "RimSort.1.log").read_text(encoding="utf-8") == "old session"
     logger.remove()
 
 
@@ -178,7 +178,7 @@ def test_setup_logging_exception_rendered(tmp_path: Path) -> None:
     except ValueError:
         logger.exception("caught error")
     logger.complete()
-    content = (tmp_path / "RimSort.log").read_text()
+    content = (tmp_path / "RimSort.log").read_text(encoding="utf-8")
     assert "ValueError" in content
     assert "test error" in content
     logger.remove()

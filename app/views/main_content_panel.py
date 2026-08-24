@@ -17,6 +17,7 @@ from PySide6.QtCore import (
     QObject,
     QProcess,
     Qt,
+    QThread,
     Signal,
     Slot,
 )
@@ -59,6 +60,7 @@ from app.utils.generic import (
     upload_log_to_privatebin,
 )
 from app.utils.json_utils import atomic_json_dump
+from app.utils.perf_timing import log_stage
 from app.utils.rentry.wrapper import RentryImport
 from app.utils.startup_impact import invalidate_startup_impact_cache
 from app.utils.steam.availability import check_steam_available
@@ -102,6 +104,25 @@ from app.windows.workshop_mod_updater_panel import WorkshopModUpdaterPanel
 if TYPE_CHECKING:
     # 仅类型注解需要;运行时在 _do_browse_workshop 内延迟导入(QtWebEngine 链较重)
     from app.utils.steam.steambrowser.browser import SteamBrowser
+
+
+class _WorkshopConnectivityWorker(QThread):
+    """后台探测连通性。
+
+    Workshop 更新检查前的探测若在主线程同步执行,离线时会阻塞
+    约 3s(并行短超时探测的上界);移入后台线程,结果经信号回
+    主线程后再执行后续动画流程。
+    """
+
+    online = Signal()
+    offline = Signal()
+
+    def run(self) -> None:
+        # 后台线程禁止弹 Qt 控件,提示由主线程 offline 回调补齐
+        if check_internet_connection(show_error_dialog=False):
+            self.online.emit()
+        else:
+            self.offline.emit()
 
 
 class MainContent(QObject):
@@ -331,6 +352,8 @@ class MainContent(QObject):
         self.window_manager = WindowManager(self.metadata_controller)
         self._active_loading_loop: QEventLoop | None = None
         self._refresh_in_progress: bool = False
+        # 持引用防 QThread 被 GC(后台探测 Workshop 更新检查连通性)
+        self._workshop_connectivity_worker: _WorkshopConnectivityWorker | None = None
 
     @classmethod
     def instance(cls, *args: Any, **kwargs: Any) -> "MainContent":
@@ -854,15 +877,17 @@ class MainContent(QObject):
         if self.check_if_essential_paths_are_set(prompt=is_initial):
             # Run expensive calculations to set cache data
             self._refresh_in_progress = True
-            result = self.do_threaded_loading_animation(
-                gif_path=str(
-                    AppInfo().theme_data_folder / "default-icons" / "rimsort.gif"
-                ),
-                target=partial(
-                    self.metadata_controller.refresh_metadata,
-                ),
-                text=self.tr("Scanning mod sources and populating metadata..."),
-            )
+            # 打点:扫描+元数据填充(后台线程执行,含动画等待)
+            with log_stage("refresh.scan_and_metadata"):
+                result = self.do_threaded_loading_animation(
+                    gif_path=str(
+                        AppInfo().theme_data_folder / "default-icons" / "rimsort.gif"
+                    ),
+                    target=partial(
+                        self.metadata_controller.refresh_metadata,
+                    ),
+                    text=self.tr("Scanning mod sources and populating metadata..."),
+                )
             self._refresh_in_progress = False
 
             # If loading was aborted (e.g. window closed during scan), skip remaining work
@@ -870,17 +895,20 @@ class MainContent(QObject):
                 return
 
             # Insert mod data into list
-            self.__repopulate_lists(is_initial=is_initial)
-            self.mods_panel.refresh_all_tag_filter_selectors()
+            with log_stage("refresh.repopulate_lists"):
+                self.__repopulate_lists(is_initial=is_initial)
+                self.mods_panel.refresh_all_tag_filter_selectors()
 
-            # check if we have duplicate mods, prompt user
-            self.__duplicate_mods_prompt()
+            # 打点:扫描后的同步尾段(重复/缺失/缺属性检查,可能弹窗)
+            with log_stage("refresh.mod_prompts"):
+                # check if we have duplicate mods, prompt user
+                self.__duplicate_mods_prompt()
 
-            # check if we have missing mods, prompt user
-            self.__missing_mods_prompt()
+                # check if we have missing mods, prompt user
+                self.__missing_mods_prompt()
 
-            # Check if we have mods with missing properties (Package ID and/or Publish Field ID)
-            self.__check_and_warn_missing_mod_properties()
+                # Check if we have mods with missing properties (Package ID and/or Publish Field ID)
+                self.__check_and_warn_missing_mod_properties()
 
             # Check Workshop mods for updates if configured
             if self.settings.steam_mods_update_check:
@@ -1962,8 +1990,29 @@ class MainContent(QObject):
         self.steam_browser.show()
 
     def _do_check_for_workshop_updates(self) -> None:
-        if not check_internet_connection():
+        # 连通性探测在后台线程执行:离线时主线程同步探测会阻塞约 3s
+        # (iter-10 同类问题的残留点),结果经信号回主线程后继续原流程
+        if (
+            self._workshop_connectivity_worker is not None
+            and self._workshop_connectivity_worker.isRunning()
+        ):
+            logger.debug("Workshop connectivity probe already running, skipping")
             return
+        self._workshop_connectivity_worker = _WorkshopConnectivityWorker()
+        self._workshop_connectivity_worker.online.connect(
+            self._on_workshop_probe_online
+        )
+        self._workshop_connectivity_worker.offline.connect(
+            self._on_workshop_probe_offline
+        )
+        self._workshop_connectivity_worker.start()
+
+    def _on_workshop_probe_offline(self) -> None:
+        """离线回调:主线程补齐原同步实现的连接错误弹窗语义。"""
+        dialogue.show_internet_connection_error()
+
+    def _on_workshop_probe_online(self) -> None:
+        """在线回调:执行 Workshop 更新查询(原探测后的流程)。"""
         result: WorkshopUpdateResult = self.do_threaded_loading_animation(
             gif_path=str(
                 AppInfo().theme_data_folder / "default-icons" / "steam_api.gif"

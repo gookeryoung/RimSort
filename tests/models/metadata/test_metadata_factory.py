@@ -1,6 +1,5 @@
 import shutil
 import sys
-import warnings
 from pathlib import Path
 
 import pygit2
