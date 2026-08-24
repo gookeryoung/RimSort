@@ -35,6 +35,7 @@ from app.utils.acf_utils import refresh_acf_metadata
 from app.utils.app_info import AppInfo
 from app.utils.event_bus import EventBus
 from app.utils.gui_info import GUIInfo
+from app.utils.perf_timing import log_stage
 from app.utils.steam.steamcmd.wrapper import SteamcmdInterface
 from app.utils.watchdog import WatchdogHandler
 from app.utils.window_launch_state import apply_window_launch_state
@@ -101,77 +102,81 @@ class MainWindow(QMainWindow):
         app_layout.addWidget(self.tab_widget)
 
         # Create various panels on the application GUI
-        self.main_content_panel: MainContent = MainContent(
-            settings=self.settings,
-            show_settings_dialog=self._show_settings_dialog,
-            settings_dialog=settings_dialog,
-            metadata_controller=self.metadata_controller,
-        )
+        with log_stage("main_window.MainContent"):
+            self.main_content_panel: MainContent = MainContent(
+                settings=self.settings,
+                show_settings_dialog=self._show_settings_dialog,
+                settings_dialog=settings_dialog,
+                metadata_controller=self.metadata_controller,
+            )
         self.main_content_panel.disable_enable_widgets_signal.connect(
             self.__disable_enable_widgets
         )
         self.main_content_panel.stop_watchdog_signal.connect(self.shutdown_watchdog)
 
-        self.bottom_panel = Status()
+        with log_stage("main_window.status_and_buttons"):
+            self.bottom_panel = Status()
 
-        # Create and add the Main Content panel tab
-        self.main_content_tab = QWidget()
-        self.main_content_layout = QVBoxLayout()
-        self.main_content_tab.setLayout(self.main_content_layout)
+            # Create and add the Main Content panel tab
+            self.main_content_tab = QWidget()
+            self.main_content_layout = QVBoxLayout()
+            self.main_content_tab.setLayout(self.main_content_layout)
 
-        # Add the MainContent panel to the tab
-        self.main_content_layout.addWidget(self.main_content_panel.main_layout_frame)
+            # Add the MainContent panel to the tab
+            self.main_content_layout.addWidget(
+                self.main_content_panel.main_layout_frame
+            )
 
-        # Create button layout and add it to the main content layout
-        button_layout = QHBoxLayout()
-        self.main_content_layout.addLayout(button_layout)
+            # Create button layout and add it to the main content layout
+            button_layout = QHBoxLayout()
+            self.main_content_layout.addLayout(button_layout)
 
-        self.game_version_label = QLabel()
-        self.game_version_label.setFont(GUIInfo().smaller_font)
-        self.game_version_label.setEnabled(False)
-        button_layout.addWidget(self.game_version_label)
+            self.game_version_label = QLabel()
+            self.game_version_label.setFont(GUIInfo().smaller_font)
+            self.game_version_label.setEnabled(False)
+            button_layout.addWidget(self.game_version_label)
 
-        button_layout.addStretch()
+            button_layout.addStretch()
 
-        # Define button attributes
-        self.refresh_button = QPushButton(self.tr("Refresh"))
-        self.clear_button = QPushButton(self.tr("Clear"))
-        self.restore_button = QPushButton(self.tr("Restore"))
-        self.sort_button = QPushButton(self.tr("Sort"))
-        self.save_button = QPushButton(self.tr("Save"))
-        self.run_button = QPushButton(self.tr("Run"))
+            # Define button attributes
+            self.refresh_button = QPushButton(self.tr("Refresh"))
+            self.clear_button = QPushButton(self.tr("Clear"))
+            self.restore_button = QPushButton(self.tr("Restore"))
+            self.sort_button = QPushButton(self.tr("Sort"))
+            self.save_button = QPushButton(self.tr("Save"))
+            self.run_button = QPushButton(self.tr("Run"))
 
-        buttons = [
-            self.refresh_button,
-            self.clear_button,
-            self.restore_button,
-            self.sort_button,
-            self.save_button,
-            self.run_button,
-        ]
+            buttons = [
+                self.refresh_button,
+                self.clear_button,
+                self.restore_button,
+                self.sort_button,
+                self.save_button,
+                self.run_button,
+            ]
 
-        for button in buttons:
-            button.setMinimumWidth(100)
-            button_layout.addWidget(button)
+            for button in buttons:
+                button.setMinimumWidth(100)
+                button_layout.addWidget(button)
 
-        self.tab_widget.addTab(self.main_content_tab, self.tr("Main Content"))
+            self.tab_widget.addTab(self.main_content_tab, self.tr("Main Content"))
 
-        # Create and add the ACF Data tab
+        # Create and add the ACF Data tab (懒构造:首次激活该 tab 时才创建面板)
         self.acf_log_reader_tab = QWidget()
         self.acf_log_reader_layout = QVBoxLayout()
         self.acf_log_reader_tab.setLayout(self.acf_log_reader_layout)
 
-        # Instantiate the AcfDataWindow and add it to the tab
-        self.acf_log_reader = AcfLogReader(
-            metadata_controller=self.metadata_controller,
-            active_mods_list=self.main_content_panel.mods_panel.active_mods_list,
-        )
-        self.acf_log_reader_layout.addWidget(self.acf_log_reader)
-
+        # AcfLogReader 不在首屏,其 QTableView 构造会触发 QSS 全量规则编译
+        # (实测约 220ms,一次性成本)。推迟到首次切换该 tab 时构造,可将其
+        # 移出启动关键路径;构造后主动补一次 populate,同步启动期已完成的
+        # 元数据刷新(懒构造错过了 refresh_finished 信号)。
+        self.acf_log_reader: AcfLogReader | None = None
         self.tab_widget.addTab(self.acf_log_reader_tab, self.tr("ACF Log Reader"))
+        self.tab_widget.currentChanged.connect(self._ensure_acf_log_reader)
 
         # Create and add the Player Log tab
-        self.player_log_widget = PlayerLogTab(self.settings)
+        with log_stage("main_window.PlayerLogTab"):
+            self.player_log_widget = PlayerLogTab(self.settings)
         self.tab_widget.addTab(self.player_log_widget, self.tr("Player Log"))
 
         # Create and add the Search tab
@@ -180,12 +185,13 @@ class MainWindow(QMainWindow):
         self.file_search_tab.setLayout(self.file_search_layout)
 
         # Instantiate the SearchWindow and add it to the tab
-        self.file_search_dialog = FileSearchDialog()
-        self.file_search_controller = FileSearchController(
-            settings=self.settings,
-            dialog=self.file_search_dialog,
-            metadata_controller=self.metadata_controller,
-        )
+        with log_stage("main_window.FileSearch"):
+            self.file_search_dialog = FileSearchDialog()
+            self.file_search_controller = FileSearchController(
+                settings=self.settings,
+                dialog=self.file_search_dialog,
+                metadata_controller=self.metadata_controller,
+            )
         self.file_search_layout.addWidget(self.file_search_dialog)
 
         self.tab_widget.addTab(self.file_search_tab, self.tr("File Search"))
@@ -196,11 +202,12 @@ class MainWindow(QMainWindow):
         self.troubleshooting_tab.setLayout(self.troubleshooting_layout)
 
         # Instantiate the TroubleshootingDialog and add it to the tab
-        self.troubleshooting_dialog = TroubleshootingDialog()
-        self.troubleshooting_controller = TroubleshootingController(
-            settings=self.settings,
-            dialog=self.troubleshooting_dialog,
-        )
+        with log_stage("main_window.Troubleshooting"):
+            self.troubleshooting_dialog = TroubleshootingDialog()
+            self.troubleshooting_controller = TroubleshootingController(
+                settings=self.settings,
+                dialog=self.troubleshooting_dialog,
+            )
         self.troubleshooting_layout.addWidget(self.troubleshooting_dialog)
         self.tab_widget.addTab(self.troubleshooting_tab, self.tr("Troubleshooting"))
 
@@ -218,35 +225,40 @@ class MainWindow(QMainWindow):
         widget.setLayout(app_layout)
         self.setCentralWidget(widget)
 
-        self.mods_panel_controller = ModsPanelController(
-            view=self.main_content_panel.mods_panel,
-            settings=self.settings,
-        )
+        with log_stage("main_window.ModsPanelController"):
+            self.mods_panel_controller = ModsPanelController(
+                view=self.main_content_panel.mods_panel,
+                settings=self.settings,
+            )
 
-        self.menu_bar = MenuBar(menu_bar=self.menuBar(), settings=self.settings)
-        self.menu_bar_controller = MenuBarController(
-            view=self.menu_bar,
-            settings=self.settings,
-            show_settings_dialog=self._show_settings_dialog,
-        )
+        with log_stage("main_window.MenuBar"):
+            self.menu_bar = MenuBar(menu_bar=self.menuBar(), settings=self.settings)
+            self.menu_bar_controller = MenuBarController(
+                view=self.menu_bar,
+                settings=self.settings,
+                show_settings_dialog=self._show_settings_dialog,
+            )
 
-        self.main_content_controller = MainContentController(
-            view=self.main_content_panel,
-            settings=self.settings,
-            metadata_controller=self.metadata_controller,
-        )
+        with log_stage("main_window.MainContentController"):
+            self.main_content_controller = MainContentController(
+                view=self.main_content_panel,
+                settings=self.settings,
+                metadata_controller=self.metadata_controller,
+            )
 
-        self.todds_controller = ToddsController(
-            settings=self.settings,
-            metadata_controller=self.main_content_panel.metadata_controller,
-        )
+        with log_stage("main_window.ToddsController"):
+            self.todds_controller = ToddsController(
+                settings=self.settings,
+                metadata_controller=self.main_content_panel.metadata_controller,
+            )
         self.main_content_panel.todds_controller = self.todds_controller
 
         # Connect Instances Menu Bar signals
         EventBus().do_activate_current_instance.connect(self.__switch_to_instance)
 
         # launch the main window
-        self._launch_main_window()
+        with log_stage("main_window.launch_state"):
+            self._launch_main_window()
         logger.debug("Finished MainWindow initialization")
 
     def _launch_main_window(self) -> None:
@@ -261,6 +273,27 @@ class MainWindow(QMainWindow):
         logger.info(
             f"Main window started with launch state: {main_window_launch_state}"
         )
+
+    def _ensure_acf_log_reader(self, index: int) -> None:
+        """首次激活 ACF Log Reader tab 时构造面板(懒加载)。
+
+        面板构造触发 QSS 表格规则一次性全量编译(约 220ms),推迟到
+        首次激活可将其移出启动关键路径;构造后主动补一次 populate,
+        同步启动期已完成的元数据刷新(构造时错过了 refresh_finished)。
+        """
+        if self.acf_log_reader is not None:
+            return
+        if self.tab_widget.widget(index) is not self.acf_log_reader_tab:
+            return
+        with log_stage("main_window.AcfLogReader"):
+            self.acf_log_reader = AcfLogReader(
+                metadata_controller=self.metadata_controller,
+                active_mods_list=self.main_content_panel.mods_panel.active_mods_list,
+            )
+            self.acf_log_reader_layout.addWidget(self.acf_log_reader)
+            # 同步当前元数据状态;若主刷新流程正在进行,内部守卫会跳过,
+            # 待流程结束时由 refresh_finished 信号正常填充
+            self.acf_log_reader._populate_from_metadata()
 
     def __disable_enable_widgets(self, enable: bool) -> None:
         # Disable widgets
@@ -364,7 +397,6 @@ class MainWindow(QMainWindow):
             if diag.exec_is_positive():
                 instance.steam_client_integration = True
                 self._set_instance(instance)
-
 
     def __switch_to_instance(self, instance: str) -> None:
         """Switch to a different instance."""

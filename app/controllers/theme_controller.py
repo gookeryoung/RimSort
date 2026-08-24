@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QComboBox
 
 from app.models.settings import Settings
 from app.utils.app_info import AppInfo
+from app.utils.perf_timing import log_stage
 from app.views.dialogue import show_warning
 
 if TYPE_CHECKING:
@@ -182,7 +183,8 @@ class ThemeController:
         if enable_themes:
             stylesheet = self.load_theme(selected_theme_name)
             if stylesheet:
-                self.app_instance.setStyleSheet(stylesheet)
+                with log_stage("theme.setStyleSheet"):
+                    self.app_instance.setStyleSheet(stylesheet)
                 logger.info(f"Applied theme: {selected_theme_name}")
             else:
                 logger.warning(

@@ -34,19 +34,30 @@ class AppController(QObject):
             self.app = QApplication(sys.argv)
             self.app.setDesktopFileName("io.github.rimsort.RimSort")
             self.app.setWindowIcon(GUIInfo().app_icon)
+            # 在任何控件创建之前设置全局样式:此刻控件树为空,setStyle
+            # 瞬时完成;若推迟到 set_theme(此时 SettingsDialog 等大量控件
+            # 已构造),全局样式切换会 unpolish/polish 所有已建控件,实测
+            # 约 190ms,是启动期最重的单点开销之一
+            self.app.setStyle("Fusion")
 
-        # Initialize the application settings.
-        with log_stage("initialize_settings"):
-            self.initialize_settings()
-        # set the language of the application.
-        with log_stage("set_language"):
-            self.set_language()
+        # 先加载 Settings 模型并应用主题,再构造 SettingsDialog:
+        # 此刻控件树为空,setStyle/setStyleSheet 瞬时完成;若先构造
+        # SettingsDialog(大量控件)再应用主题,QApplication 级样式变更
+        # 需对全部已建控件 unpolish+repolish,实测增加约 200ms 启动耗时
+        with log_stage("initialize_settings_model"):
+            self._load_settings_model()
         # Initialize the theme controller
         with log_stage("initialize_theme_controller"):
             self.initialize_theme_controller()
         # Set the theme of the application.
         with log_stage("set_theme"):
             self.set_theme()
+        # Construct the settings dialog (控件创建时已带全局 QSS,单次 polish)
+        with log_stage("initialize_settings_dialog"):
+            self._initialize_settings_dialog()
+        # set the language of the application.
+        with log_stage("set_language"):
+            self.set_language()
         # Initialize the Steamcmd interface
         with log_stage("initialize_steamcmd_interface"):
             self.initialize_steamcmd_interface()
@@ -75,7 +86,8 @@ class AppController(QObject):
 
     def set_theme(self) -> None:
         """Sets the theme for the application."""
-        self.app.setStyle("Fusion")
+        # 全局 Fusion 样式已在 QApplication 构造后立即设置(见 __init__),
+        # 此处不再重复调用 setStyle,避免对已构造的大量控件做样式重算
         self.theme_controller.set_font(
             self.settings.font_family,
             self.settings.font_size,
@@ -86,15 +98,27 @@ class AppController(QObject):
         )
 
     def initialize_settings(self) -> None:
-        """Initializes the settings model, view, and controller."""
+        """Initializes the settings model, view, and controller.
+
+        组合入口:先加载模型再构造对话框(set_language 的 initial setup
+        路径二次调用时保持原有完整重建语义)。
+        """
+        self._load_settings_model()
+        self._initialize_settings_dialog()
+
+    def _load_settings_model(self) -> None:
+        """加载 Settings 模型与翻译器(不涉及任何控件构造)。"""
         self.settings = Settings()
         self.settings.load()
+        app_globals.SETTINGS = self.settings
         self.initialize_translator(self.settings.language)
+
+    def _initialize_settings_dialog(self) -> None:
+        """构造 SettingsDialog 与 SettingsController(重量级控件树)。"""
         self.settings_dialog = SettingsDialog()
         self.settings_controller = SettingsController(
             model=self.settings, view=self.settings_dialog
         )
-        app_globals.SETTINGS = self.settings
 
     def initialize_theme_controller(self) -> None:
         """Initializes the ThemeController."""
