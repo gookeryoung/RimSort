@@ -831,7 +831,7 @@ def _setup_error_icon(
     diag: QDialog, details_btn: QPushButton | None = None
 ) -> QVBoxLayout:
     l_layout = QVBoxLayout()
-    piximap = QStyle.SP_MessageBoxCritical
+    piximap = QStyle.StandardPixmap.SP_MessageBoxCritical
     icon = diag.style().standardIcon(piximap)
     label = QLabel()
     label.setPixmap(icon.pixmap(64, 64))

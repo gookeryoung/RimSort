@@ -1,6 +1,5 @@
 import shutil
 import sys
-import warnings
 from pathlib import Path
 
 import pygit2
@@ -258,11 +257,13 @@ def test_create_base_rules_ludeon_core() -> None:
 
 def test_get_rules_db_large_db(tmp_path: Path) -> None:
     repo = "https://github.com/RimSort/Community-Rules-Database.git"
-    _ = pygit2.clone_repository(repo, str(tmp_path), depth=1)
+    try:
+        _ = pygit2.clone_repository(repo, str(tmp_path), depth=1)
+    except pygit2.GitError as e:
+        pytest.skip(f"无法克隆远端规则库(网络受限): {e}")
     file = tmp_path / "communityRules.json"
     if not file.exists():
-        warnings.warn("communityRules.json could not be found! Skipping test.")
-        return
+        pytest.skip("communityRules.json 在仓库中不存在,数据布局已变更")
     assert read_rules_db(file) is not None
 
 
@@ -422,11 +423,13 @@ def test_read_steam_db() -> None:
 
 def test_read_steam_db_large(tmp_path: Path) -> None:
     repo = "https://github.com/RimSort/Steam-Workshop-Database.git"
-    _ = pygit2.clone_repository(repo, str(tmp_path), depth=1)
+    try:
+        _ = pygit2.clone_repository(repo, str(tmp_path), depth=1)
+    except pygit2.GitError as e:
+        pytest.skip(f"无法克隆远端创意工坊库(网络受限): {e}")
     file = tmp_path / "steamDB.json"
     if not file.exists():
-        warnings.warn("steamDB.json could not be found! Skipping test.")
-        return
+        pytest.skip("steamDB.json 在仓库中不存在,数据布局已变更")
     steam_db = read_steam_db(file)
     assert steam_db is not None
 

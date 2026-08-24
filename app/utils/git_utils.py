@@ -60,9 +60,7 @@ class GitOperationType(Enum):
 class GitNotificationHandler(Protocol):
     """Protocol for handling git operation notifications."""
 
-    def show_error(
-        self, title: str, message: str, details: str | None = None
-    ) -> None:
+    def show_error(self, title: str, message: str, details: str | None = None) -> None:
         """Show error notification to user."""
         ...
 
@@ -70,9 +68,7 @@ class GitNotificationHandler(Protocol):
 class DefaultNotificationHandler:
     """Default implementation using QMessageBox for notifications."""
 
-    def show_error(
-        self, title: str, message: str, details: str | None = None
-    ) -> None:
+    def show_error(self, title: str, message: str, details: str | None = None) -> None:
         """Show error notification using InformationBox."""
         InformationBox(
             title=title,
@@ -151,7 +147,8 @@ def _fetch_with_timeout(repo: Repository, remote: pygit2.Remote, timeout: int) -
         # Timeout occurred
         logger.warning(f"Fetch operation timed out after {timeout} seconds")
         # Prevent the repository from being freed while the C-level fetch is still running
-        repo._has_hanging_threads = True
+        # (pygit2 未在类型存根中声明该属性,故需类型忽略)
+        repo._has_hanging_threads = True  # type: ignore[attr-defined]
         return False
 
     if result["error"]:
