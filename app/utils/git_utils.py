@@ -60,7 +60,9 @@ class GitOperationType(Enum):
 class GitNotificationHandler(Protocol):
     """Protocol for handling git operation notifications."""
 
-    def show_error(self, title: str, message: str, details: str | None = None) -> None:
+    def show_error(
+        self, title: str, message: str, details: str | None = None
+    ) -> None:
         """Show error notification to user."""
         ...
 
@@ -68,7 +70,9 @@ class GitNotificationHandler(Protocol):
 class DefaultNotificationHandler:
     """Default implementation using QMessageBox for notifications."""
 
-    def show_error(self, title: str, message: str, details: str | None = None) -> None:
+    def show_error(
+        self, title: str, message: str, details: str | None = None
+    ) -> None:
         """Show error notification using InformationBox."""
         InformationBox(
             title=title,
