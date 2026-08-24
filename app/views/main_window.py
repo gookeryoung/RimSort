@@ -179,37 +179,29 @@ class MainWindow(QMainWindow):
             self.player_log_widget = PlayerLogTab(self.settings)
         self.tab_widget.addTab(self.player_log_widget, self.tr("Player Log"))
 
-        # Create and add the Search tab
+        # Create and add the Search tab (懒构造:首次激活该 tab 时才创建)
         self.file_search_tab = QWidget()
         self.file_search_layout = QVBoxLayout()
         self.file_search_tab.setLayout(self.file_search_layout)
 
-        # Instantiate the SearchWindow and add it to the tab
-        with log_stage("main_window.FileSearch"):
-            self.file_search_dialog = FileSearchDialog()
-            self.file_search_controller = FileSearchController(
-                settings=self.settings,
-                dialog=self.file_search_dialog,
-                metadata_controller=self.metadata_controller,
-            )
-        self.file_search_layout.addWidget(self.file_search_dialog)
-
+        # FileSearchDialog 与控制器约 19ms 构造成本,控制器仅连接对话框
+        # 本地信号,无启动期 EventBus 订阅,推迟构造不改变行为。
+        self.file_search_dialog: FileSearchDialog | None = None
+        self.file_search_controller: FileSearchController | None = None
         self.tab_widget.addTab(self.file_search_tab, self.tr("File Search"))
+        self.tab_widget.currentChanged.connect(self._ensure_file_search)
 
-        # Create and add the Troubleshooting tab
+        # Create and add the Troubleshooting tab (懒构造:首次激活该 tab 时才创建)
         self.troubleshooting_tab = QWidget()
         self.troubleshooting_layout = QVBoxLayout()
         self.troubleshooting_tab.setLayout(self.troubleshooting_layout)
 
-        # Instantiate the TroubleshootingDialog and add it to the tab
-        with log_stage("main_window.Troubleshooting"):
-            self.troubleshooting_dialog = TroubleshootingDialog()
-            self.troubleshooting_controller = TroubleshootingController(
-                settings=self.settings,
-                dialog=self.troubleshooting_dialog,
-            )
-        self.troubleshooting_layout.addWidget(self.troubleshooting_dialog)
+        # TroubleshootingDialog 与控制器约 9ms 构造成本,控制器仅连接对话
+        # 框本地按钮信号(动作时才 emit EventBus),推迟构造不改变行为。
+        self.troubleshooting_dialog: TroubleshootingDialog | None = None
+        self.troubleshooting_controller: TroubleshootingController | None = None
         self.tab_widget.addTab(self.troubleshooting_tab, self.tr("Troubleshooting"))
+        self.tab_widget.currentChanged.connect(self._ensure_troubleshooting)
 
         # Save button flashing animation
         self.save_button_flashing_animation = QTimer()
@@ -294,6 +286,35 @@ class MainWindow(QMainWindow):
             # 同步当前元数据状态;若主刷新流程正在进行,内部守卫会跳过,
             # 待流程结束时由 refresh_finished 信号正常填充
             self.acf_log_reader._populate_from_metadata()
+
+    def _ensure_file_search(self, index: int) -> None:
+        """首次激活 File Search tab 时构造搜索对话框与控制器(懒加载)。"""
+        if self.file_search_dialog is not None:
+            return
+        if self.tab_widget.widget(index) is not self.file_search_tab:
+            return
+        with log_stage("main_window.FileSearch"):
+            self.file_search_dialog = FileSearchDialog()
+            self.file_search_controller = FileSearchController(
+                settings=self.settings,
+                dialog=self.file_search_dialog,
+                metadata_controller=self.metadata_controller,
+            )
+        self.file_search_layout.addWidget(self.file_search_dialog)
+
+    def _ensure_troubleshooting(self, index: int) -> None:
+        """首次激活 Troubleshooting tab 时构造排障对话框与控制器(懒加载)。"""
+        if self.troubleshooting_dialog is not None:
+            return
+        if self.tab_widget.widget(index) is not self.troubleshooting_tab:
+            return
+        with log_stage("main_window.Troubleshooting"):
+            self.troubleshooting_dialog = TroubleshootingDialog()
+            self.troubleshooting_controller = TroubleshootingController(
+                settings=self.settings,
+                dialog=self.troubleshooting_dialog,
+            )
+        self.troubleshooting_layout.addWidget(self.troubleshooting_dialog)
 
     def __disable_enable_widgets(self, enable: bool) -> None:
         # Disable widgets
