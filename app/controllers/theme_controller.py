@@ -16,12 +16,32 @@ if TYPE_CHECKING:
 
 
 class ThemeController:
+    """主题控制器(进程级单例)。
+
+    单例原因:构造时需扫描主题目录获取支持列表(磁盘 I/O),启动链路中
+    AppController/SettingsController/AppearanceTabController 等多处构造,
+    重复扫描浪费约 200ms;且 set_font 等可变状态在多实例间分裂,
+    单例化保证字体/主题设置全局一致。
+    """
+
+    _instance: ThemeController | None = None
+
+    def __new__(cls, default_theme: str = "RimPy") -> ThemeController:
+        """复用已有实例,避免重复的目录扫描与状态分裂。"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self, default_theme: str = "RimPy") -> None:
         """Initialize the ThemeController with a default theme.
 
         Args:
             default_theme (str): The name of the default theme. Defaults to "RimPy".
         """
+        # 单例已初始化过则跳过:__init__ 在每次 ThemeController() 时都会
+        # 被调用,守卫避免重复扫描目录覆盖运行期 set_font 等状态
+        if getattr(self, "_initialized", False):
+            return
         self.app_info = AppInfo()
         self.app_instance = QApplication.instance()
         logger.info("Initializing ThemeController")
@@ -34,6 +54,7 @@ class ThemeController:
         ]
         self.font_family = "Tahoma"
         self.font_size = 12
+        self._initialized = True
 
     def _get_supported_themes(self) -> set[str]:
         """Retrieves a set of supported themes from the theme data and storage folders."""

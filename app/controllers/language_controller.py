@@ -17,12 +17,31 @@ if TYPE_CHECKING:
 
 
 class LanguageController:
+    """语言控制器(进程级单例)。
+
+    单例原因:构造时需扫描语言目录获取支持列表(磁盘 I/O),启动链路中
+    SettingsController/AppearanceTabController/SettingsDialog 等多处构造,
+    重复扫描浪费启动时间;语言列表在进程生命周期内不变,单例安全。
+    """
+
+    _instance: LanguageController | None = None
+
+    def __new__(cls, default_language: str = "en_US") -> LanguageController:
+        """复用已有实例,避免重复的目录扫描。"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self, default_language: str = "en_US") -> None:
         """Initialize the LanguageController with a default language.
 
         Args:
             default_language (str): The name of the default language. Defaults to "en".
         """
+        # 单例已初始化过则跳过:__init__ 在每次 LanguageController() 时都会
+        # 被调用,守卫避免重复扫描目录
+        if getattr(self, "_initialized", False):
+            return
         self.app_info = AppInfo()
         self.app_instance = QApplication.instance()
         logger.info("Initializing LanguageController")
@@ -30,6 +49,7 @@ class LanguageController:
         self._language_data_folder = self.app_info.language_data_folder
         self.languages = self._get_supported_languages()
         logger.info(f"Supported languages: {self.languages}")
+        self._initialized = True
 
     def _get_supported_languages(self) -> set[str]:
         language_names = self._get_language_names_from_folder(

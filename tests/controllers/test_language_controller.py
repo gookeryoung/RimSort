@@ -13,6 +13,9 @@ class TestLanguageController(unittest.TestCase):
         self.app = QApplication.instance()
         if self.app is None:
             self.app = QApplication([])
+        # 重置单例:保证每个用例 mock 后新构造的实例真实执行 __init__,
+        # 使 _get_supported_languages / language_data_folder 的 patch 生效
+        LanguageController._instance = None
 
     def test_populate_languages_combobox(self) -> None:
         """Test that the language combobox is populated correctly."""
